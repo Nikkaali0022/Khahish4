@@ -48,16 +48,16 @@ jobs:
 
           PROJECT_DIR=$(dirname "$SETTINGS")
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Found project: $PROJECT_DIR"
 
       - name: Place Firebase config
         run: |
           cp google-services.json "$PROJECT_DIR/app/google-services.json"
 
-      - name: Configure Firebase Gradle
+      - name: Configure Firebase and Kotlin
         run: |
           python3 - <<'PY'
           import os
+          import re
           from pathlib import Path
 
           project = Path(os.environ["PROJECT_DIR"])
@@ -65,25 +65,29 @@ jobs:
           app = project / "app" / "build.gradle.kts"
 
           s = root.read_text()
-          old = '    id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false\n'
+
+          s = re.sub(
+              r'(id\("org\.jetbrains\.kotlin\.(?:android|plugin\.compose)"\) version ")[^"]+(" apply false)',
+              r'\g<1>2.4.21\g<2>',
+              s
+          )
 
           if 'id("com.google.gms.google-services")' not in s:
-              assert old in s
               s = s.replace(
-                  old,
-                  old + '    id("com.google.gms.google-services") version "4.5.0" apply false\n'
+                  'id("org.jetbrains.kotlin.plugin.compose") version "2.4.21" apply false',
+                  'id("org.jetbrains.kotlin.plugin.compose") version "2.4.21" apply false\n'
+                  '    id("com.google.gms.google-services") version "4.5.0" apply false'
               )
 
           root.write_text(s)
 
           s = app.read_text()
-          old = '    id("org.jetbrains.kotlin.plugin.compose")\n'
 
           if 'id("com.google.gms.google-services")' not in s:
-              assert old in s
               s = s.replace(
-                  old,
-                  old + '    id("com.google.gms.google-services")\n'
+                  'id("org.jetbrains.kotlin.plugin.compose")',
+                  'id("org.jetbrains.kotlin.plugin.compose")\n'
+                  '    id("com.google.gms.google-services")'
               )
 
           if "firebase-bom" not in s:
@@ -97,7 +101,8 @@ jobs:
               )
 
           app.write_text(s)
-          print("Firebase configuration completed")
+
+          print("Firebase and Kotlin configuration updated")
           PY
 
       - name: Force Java 17
@@ -107,26 +112,6 @@ jobs:
           find . -name "build.gradle*" | while read file; do
             sed -i 's/VERSION_1_8/VERSION_17/g' "$file"
           done
-
-          APP_GRADLE=$(find . -path "*/app/build.gradle.kts" -print -quit)
-
-          if [ -n "$APP_GRADLE" ] && ! grep -q "sourceCompatibility" "$APP_GRADLE"; then
-            python3 - "$APP_GRADLE" <<'PY'
-          import sys
-          from pathlib import Path
-          p = Path(sys.argv[1])
-          s = p.read_text()
-          s = s.replace(
-              "    buildFeatures { compose = true }",
-              "    compileOptions {\n"
-              "        sourceCompatibility = JavaVersion.VERSION_17\n"
-              "        targetCompatibility = JavaVersion.VERSION_17\n"
-              "    }\n"
-              "    buildFeatures { compose = true }"
-          )
-          p.write_text(s)
-          PY
-          fi
 
       - name: Build Khahish APK
         run: |
