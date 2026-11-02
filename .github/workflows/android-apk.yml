@@ -37,7 +37,7 @@ jobs:
         run: |
           mkdir extracted
           unzip KhahishAndroid-Starter-v2.zip -d extracted
-          SETTINGS=$(find extracted -name settings.gradle.kts -print -quit)
+          SETTINGS=$(find extracted -name settings.gradle.kts -o -name settings.gradle -print -quit)
           if [ -z "$SETTINGS" ]; then
             echo "Gradle project not found"
             exit 1
@@ -45,13 +45,29 @@ jobs:
           PROJECT_DIR=$(dirname "$SETTINGS")
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Fix Java 17 Compatibility
+      - name: Force Java 17 in Gradle Build
         run: |
-          find "$PROJECT_DIR" -name "build.gradle*" | while read file; do
+          cd "$PROJECT_DIR"
+          # Find all build.gradle or build.gradle.kts files and inject/replace java version
+          find . -name "build.gradle*" | while read file; do
+            echo "Processing $file"
+            # Replace old java versions if they exist
             sed -i 's/VERSION_1_8/VERSION_17/g' "$file"
-            sed -i 's/"1.8"/"17"/g' "I$file" 2>/dev/null || true
-            sed -i "s/'1.8'/'17'/g" "$file"
+            sed -i 's/1.8/17/g' "$file"
           done
+          
+          # Also append compileOptions and kotlinOptions to app/build.gradle.kts if it exists
+          APP_GRADLE=$(find . -path "*/app/build.gradle*")
+          if [ -n "$APP_GRADLE" ]; then
+            echo "Injecting Java 17 options into $APP_GRADLE"
+            echo "" >> "$APP_GRADLE"
+            echo "android {" >> "$APP_GRADLE"
+            echo "    compileOptions {" >> "$APP_GRADLE"
+            echo "        sourceCompatibility = JavaVersion.VERSION_17" >> "$APP_GRADLE"
+            echo "        targetCompatibility = JavaVersion.VERSION_17" >> "$APP_GRADLE"
+            echo "    }" >> "$APP_GRADLE"
+            echo "}" >> "$APP_GRADLE"
+          fi
 
       - name: Build Khahish APK
         run: |
