@@ -45,6 +45,14 @@ jobs:
           PROJECT_DIR=$(dirname "$SETTINGS")
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
+      - name: Fix Java 17 Compatibility
+        run: |
+          find "$PROJECT_DIR" -name "build.gradle*" | while read file; do
+            sed -i 's/VERSION_1_8/VERSION_17/g' "$file"
+            sed -i 's/"1.8"/"17"/g' "I$file" 2>/dev/null || true
+            sed -i "s/'1.8'/'17'/g" "$file"
+          done
+
       - name: Build Khahish APK
         run: |
           cd "$PROJECT_DIR"
