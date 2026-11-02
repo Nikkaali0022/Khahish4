@@ -26,6 +26,13 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools;platforms;platforms;build-tools;'
+
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          yes | sdkmanager --licenses
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -44,12 +51,12 @@ jobs:
           PROJECT_DIR=$(dirname "$SETTINGS")
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Build APK
+      - name: Build Khahish APK
         run: |
           cd "$PROJECT_DIR"
           gradle assembleDebug
 
-      - name: Upload APK
+      - name: Upload Khahish APK
         uses: actions/upload-artifact@v4
         with:
           name: Khahish-APK
