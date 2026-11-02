@@ -38,38 +38,97 @@ jobs:
         run: |
           mkdir extracted
           unzip -q KhahishAndroid-Starter-v2.zip -d extracted
-          SETTINGS=$(find extracted -name "settings.gradle*" -print -quit)
+
+          SETTINGS=$(find extracted -name "settings.gradle.kts" -print -quit)
+
           if [ -z "$SETTINGS" ]; then
             echo "Gradle project not found"
             exit 1
           fi
+
           PROJECT_DIR=$(dirname "$SETTINGS")
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Found project directory: $PROJECT_DIR"
+          echo "Found project: $PROJECT_DIR"
 
       - name: Place Firebase config
         run: |
           cp google-services.json "$PROJECT_DIR/app/google-services.json"
 
-      - name: Force Java 17 in Gradle Build
+      - name: Configure Firebase Gradle
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          project = Path(os.environ["PROJECT_DIR"])
+          root = project / "build.gradle.kts"
+          app = project / "app" / "build.gradle.kts"
+
+          s = root.read_text()
+          old = '    id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false\n'
+
+          if 'id("com.google.gms.google-services")' not in s:
+              assert old in s
+              s = s.replace(
+                  old,
+                  old + '    id("com.google.gms.google-services") version "4.5.0" apply false\n'
+              )
+
+          root.write_text(s)
+
+          s = app.read_text()
+          old = '    id("org.jetbrains.kotlin.plugin.compose")\n'
+
+          if 'id("com.google.gms.google-services")' not in s:
+              assert old in s
+              s = s.replace(
+                  old,
+                  old + '    id("com.google.gms.google-services")\n'
+              )
+
+          if "firebase-bom" not in s:
+              s = s.replace(
+                  "dependencies {\n",
+                  'dependencies {\n'
+                  '    implementation(platform("com.google.firebase:firebase-bom:35.1.0"))\n'
+                  '    implementation("com.google.firebase:firebase-auth")\n'
+                  '    implementation("com.google.firebase:firebase-firestore")\n',
+                  1
+              )
+
+          app.write_text(s)
+          print("Firebase configuration completed")
+          PY
+
+      - name: Force Java 17
         run: |
           cd "$PROJECT_DIR"
+
           find . -name "build.gradle*" | while read file; do
             sed -i 's/VERSION_1_8/VERSION_17/g' "$file"
-            sed -i 's/1.8/17/g' "$file"
           done
-          APP_GRADLE=$(find . -path "*/app/build.gradle*")
-          if [ -n "$APP_GRADLE" ]; then
-            echo "" >> "$APP_GRADLE"
-            echo "android {" >> "$APP_GRADLE"
-            echo "    compileOptions {" >> "$APP_GRADLE"
-            echo "        sourceCompatibility = JavaVersion.VERSION_17" >> "$APP_GRADLE"
-            echo "        targetCompatibility = JavaVersion.VERSION_17" >> "$APP_GRADLE"
-            echo "    }" >> "$APP_GRADLE"
-            echo "}" >> "$APP_GRADLE"
+
+          APP_GRADLE=$(find . -path "*/app/build.gradle.kts" -print -quit)
+
+          if [ -n "$APP_GRADLE" ] && ! grep -q "sourceCompatibility" "$APP_GRADLE"; then
+            python3 - "$APP_GRADLE" <<'PY'
+          import sys
+          from pathlib import Path
+          p = Path(sys.argv[1])
+          s = p.read_text()
+          s = s.replace(
+              "    buildFeatures { compose = true }",
+              "    compileOptions {\n"
+              "        sourceCompatibility = JavaVersion.VERSION_17\n"
+              "        targetCompatibility = JavaVersion.VERSION_17\n"
+              "    }\n"
+              "    buildFeatures { compose = true }"
+          )
+          p.write_text(s)
+          PY
           fi
 
-      - name: Build Khahish APKs
+      - name: Build Khahish APK
         run: |
           cd "$PROJECT_DIR"
           gradle assembleDebug
