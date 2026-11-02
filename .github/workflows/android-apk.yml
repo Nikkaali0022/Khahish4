@@ -1,3 +1,4 @@
+
 name: Khahish Android APK
 
 on:
@@ -46,6 +47,10 @@ jobs:
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
           echo "Found project directory: $PROJECT_DIR"
 
+      - name: Place Firebase config
+        run: |
+          cp google-services.json "$PROJECT_DIR/app/google-services.json"
+
       - name: Force Java 17 in Gradle Build
         run: |
           cd "$PROJECT_DIR"
@@ -53,7 +58,6 @@ jobs:
             sed -i 's/VERSION_1_8/VERSION_17/g' "$file"
             sed -i 's/1.8/17/g' "$file"
           done
-          
           APP_GRADLE=$(find . -path "*/app/build.gradle*")
           if [ -n "$APP_GRADLE" ]; then
             echo "" >> "$APP_GRADLE"
