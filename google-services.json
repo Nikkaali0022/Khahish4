@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "942452818199",
+    "project_id": "khahish-e1a0b",
+    "storage_bucket": "khahish-e1a0b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:942452818199:android:a55832a59c35640ea1b752",
+        "android_client_info": {
+          "package_name": "com.khahish.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCI7s2_-S_hVxqMJmkRxq7LFQ8Q9vS13ok"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
