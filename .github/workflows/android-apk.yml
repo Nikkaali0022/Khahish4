@@ -32,7 +32,7 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: '8.14.4'
 
       - name: Extract Khahish project
         run: |
@@ -49,6 +49,8 @@ jobs:
           PROJECT_DIR=$(dirname "$SETTINGS")
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
+          echo "Project found: $PROJECT_DIR"
+
       - name: Place Firebase config
         run: |
           cp google-services.json "$PROJECT_DIR/app/google-services.json"
@@ -64,32 +66,98 @@ jobs:
           root = project / "build.gradle.kts"
           app = project / "app" / "build.gradle.kts"
 
+          # Update Kotlin plugin versions
           s = root.read_text()
 
-          s = re.sub(
-              r'(id\("org\.jetbrains\.kotlin\.(?:android|plugin\.compose)"\) version ")[^"]+(" apply false)',
-              r'\g<1>2.4.21\g<2>',
-              s
-          )
+          for plugin in [
+              "org.jetbrains.kotlin.android",
+              "org.jetbrains.kotlin.plugin.compose"
+          ]:
+              pattern = (
+                  r'(id\("' + re.escape(plugin) +
+                  r'"\) version ")[^"]+(" apply false)'
+              )
+              s, count = re.subn(
+                  pattern,
+                  r'\g<1>2.4.21\g<2>',
+                  s
+              )
+              if count != 1:
+                  raise Exception("Kotlin plugin not found: " + plugin)
 
+          # Add Google Services plugin
           if 'id("com.google.gms.google-services")' not in s:
+              anchor = (
+                  '    id("org.jetbrains.kotlin.plugin.compose") '
+                  'version "2.4.21" apply false'
+              )
+              if anchor not in s:
+                  raise Exception("Compose plugin line not found")
               s = s.replace(
-                  'id("org.jetbrains.kotlin.plugin.compose") version "2.4.21" apply false',
-                  'id("org.jetbrains.kotlin.plugin.compose") version "2.4.21" apply false\n'
-                  '    id("com.google.gms.google-services") version "4.5.0" apply false'
+                  anchor,
+                  anchor + '\n'
+                  '    id("com.google.gms.google-services") '
+                  'version "4.5.0" apply false'
               )
 
           root.write_text(s)
 
+          # Configure app module
           s = app.read_text()
 
+          # Apply Google Services plugin
           if 'id("com.google.gms.google-services")' not in s:
+              anchor = '    id("org.jetbrains.kotlin.plugin.compose")'
+              if anchor not in s:
+                  raise Exception("App Compose plugin not found")
               s = s.replace(
-                  'id("org.jetbrains.kotlin.plugin.compose")',
-                  'id("org.jetbrains.kotlin.plugin.compose")\n'
+                  anchor,
+                  anchor + '\n'
                   '    id("com.google.gms.google-services")'
               )
 
+          # Set Java target to 17
+          if "compileOptions {" not in s:
+              anchor = "    buildFeatures { compose = true }"
+              if anchor not in s:
+                  raise Exception("Build features block not found")
+              s = s.replace(
+                  anchor,
+                  '    compileOptions {\n'
+                  '        sourceCompatibility = JavaVersion.VERSION_17\n'
+                  '        targetCompatibility = JavaVersion.VERSION_17\n'
+                  '    }\n'
+                  + anchor
+              )
+          else:
+              s = re.sub(
+                  r'sourceCompatibility\s*=\s*JavaVersion\.VERSION_\w+',
+                  'sourceCompatibility = JavaVersion.VERSION_17',
+                  s
+              )
+              s = re.sub(
+                  r'targetCompatibility\s*=\s*JavaVersion\.VERSION_\w+',
+                  'targetCompatibility = JavaVersion.VERSION_17',
+                  s
+              )
+
+          # Set Kotlin JVM target to 17
+          if "compilerOptions {" not in s:
+              anchor = "dependencies {"
+              if anchor not in s:
+                  raise Exception("Dependencies block not found")
+              s = s.replace(
+                  anchor,
+                  'kotlin {\n'
+                  '    compilerOptions {\n'
+                  '        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget("17")\n'
+                  '    }\n'
+                  '}\n\n'
+                  + anchor,
+                  1
+              )
+
+          # Add Firebase dependencies
           if "firebase-bom" not in s:
               s = s.replace(
                   "dependencies {\n",
@@ -102,16 +170,11 @@ jobs:
 
           app.write_text(s)
 
-          print("Firebase and Kotlin configuration updated")
+          print("Firebase configured")
+          print("Kotlin version: 2.4.21")
+          print("Java target: 17")
+          print("Kotlin JVM target: 17")
           PY
-
-      - name: Force Java 17
-        run: |
-          cd "$PROJECT_DIR"
-
-          find . -name "build.gradle*" | while read file; do
-            sed -i 's/VERSION_1_8/VERSION_17/g' "$file"
-          done
 
       - name: Build Khahish APK
         run: |
