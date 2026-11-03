@@ -27,6 +27,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import coil.compose.AsyncImage
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
@@ -44,9 +46,80 @@ private val Pale = Color(0xFFF4F8F7)
 private val Muted = Color(0xFF82909A)
 
 class MainActivity : ComponentActivity() {
+
+    private val db by lazy { FirebaseFirestore.getInstance() }
+    private val auth by lazy { FirebaseAuth.getInstance() }
+
+    private var presenceUid: String? = null
+
+    private val authListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+        val newUid = firebaseAuth.currentUser?.uid
+        val oldUid = presenceUid
+
+        if (oldUid != null && oldUid != newUid) {
+            updatePresence(oldUid, false)
+        }
+
+        presenceUid = newUid
+
+        if (newUid != null) {
+            updatePresence(newUid, true)
+        }
+    }
+
+    private fun updatePresence(uid: String, online: Boolean) {
+        val updates = mutableMapOf<String, Any>(
+            "isOnline" to online
+        )
+
+        if (!online) {
+            updates["lastSeenAt"] = System.currentTimeMillis()
+        }
+
+        db.collection("users")
+            .document(uid)
+            .update(updates)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { KhahishApp() }
+
+        // Status bar ko readable aur clear rakhein
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = android.graphics.Color.WHITE
+        window.navigationBarColor = android.graphics.Color.WHITE
+
+        WindowInsetsControllerCompat(window, window.decorView)
+            .isAppearanceLightStatusBars = true
+
+        WindowInsetsControllerCompat(window, window.decorView)
+            .isAppearanceLightNavigationBars = true
+
+        auth.addAuthStateListener(authListener)
+
+        setContent {
+            KhahishApp()
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        auth.currentUser?.uid?.let {
+            presenceUid = it
+            updatePresence(it, true)
+        }
+    }
+
+    override fun onPause() {
+        presenceUid?.let {
+            updatePresence(it, false)
+        }
+        super.onPause()
+    }
+
+    override fun onDestroy() {
+        auth.removeAuthStateListener(authListener)
+        super.onDestroy()
     }
 }
 
@@ -84,8 +157,12 @@ fun KhahishApp() {
         val listener = FirebaseAuth.AuthStateListener {
             currentUser = it.currentUser
         }
+
         auth.addAuthStateListener(listener)
-        onDispose { auth.removeAuthStateListener(listener) }
+
+        onDispose {
+            auth.removeAuthStateListener(listener)
+        }
     }
 
     MaterialTheme(
@@ -96,6 +173,7 @@ fun KhahishApp() {
         )
     ) {
         val user = currentUser
+
         if (user == null) {
             AuthScreen(auth, db)
         } else {
@@ -120,7 +198,12 @@ fun AuthScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
     var loading by remember { mutableStateOf(false) }
 
     Column(
-        Modifier.fillMaxSize().background(Pale).padding(24.dp),
+        Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .background(Pale)
+            .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
@@ -128,15 +211,27 @@ fun AuthScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
             Modifier.size(76.dp).background(Green, CircleShape),
             contentAlignment = Alignment.Center
         ) {
-            Text("K", color = Color.White, fontSize = 42.sp,
-                fontWeight = FontWeight.Bold)
+            Text(
+                "K",
+                color = Color.White,
+                fontSize = 42.sp,
+                fontWeight = FontWeight.Bold
+            )
         }
 
         Spacer(Modifier.height(18.dp))
-        Text("Khahish", fontSize = 30.sp,
-            fontWeight = FontWeight.Bold, color = Ink)
-        Text(if (isSignup) "Create your account" else "Welcome back",
-            color = Muted)
+
+        Text(
+            "Khahish",
+            fontSize = 30.sp,
+            fontWeight = FontWeight.Bold,
+            color = Ink
+        )
+
+        Text(
+            if (isSignup) "Create your account" else "Welcome back",
+            color = Muted
+        )
 
         Spacer(Modifier.height(28.dp))
 
@@ -148,6 +243,7 @@ fun AuthScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
+
             Spacer(Modifier.height(12.dp))
         }
 
@@ -175,6 +271,7 @@ fun AuthScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
 
         if (isSignup) {
             Spacer(Modifier.height(12.dp))
+
             OutlinedTextField(
                 value = confirmPassword,
                 onValueChange = { confirmPassword = it },
@@ -206,10 +303,12 @@ fun AuthScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
                         error = "Apna naam enter karein."
                         return@Button
                     }
+
                     if (password.length < 6) {
                         error = "Password kam az kam 6 characters ka ho."
                         return@Button
                     }
+
                     if (password != confirmPassword) {
                         error = "Passwords match nahi karte."
                         return@Button
@@ -220,10 +319,13 @@ fun AuthScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
 
                 if (isSignup) {
                     auth.createUserWithEmailAndPassword(
-                        email.trim(), password
+                        email.trim(),
+                        password
                     ).addOnCompleteListener { task ->
+
                         if (task.isSuccessful) {
                             val user = auth.currentUser
+
                             if (user != null) {
                                 val profile = hashMapOf(
                                     "uid" to user.uid,
@@ -231,6 +333,8 @@ fun AuthScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
                                     "email" to email.trim(),
                                     "bio" to "",
                                     "photoUrl" to "",
+                                    "isOnline" to true,
+                                    "lastSeenAt" to System.currentTimeMillis(),
                                     "createdAt" to System.currentTimeMillis()
                                 )
 
@@ -239,6 +343,7 @@ fun AuthScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
                                     .set(profile)
                                     .addOnCompleteListener { saveTask ->
                                         loading = false
+
                                         if (!saveTask.isSuccessful) {
                                             error = saveTask.exception
                                                 ?.localizedMessage
@@ -256,9 +361,11 @@ fun AuthScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
                     }
                 } else {
                     auth.signInWithEmailAndPassword(
-                        email.trim(), password
+                        email.trim(),
+                        password
                     ).addOnCompleteListener { task ->
                         loading = false
+
                         if (!task.isSuccessful) {
                             error = task.exception?.localizedMessage
                                 ?: "Login nahi ho saka."
@@ -284,10 +391,12 @@ fun AuthScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
             }
         }
 
-        TextButton(onClick = {
-            isSignup = !isSignup
-            error = ""
-        }) {
+        TextButton(
+            onClick = {
+                isSignup = !isSignup
+                error = ""
+            }
+        ) {
             Text(
                 if (isSignup) "Already have an account? Login"
                 else "Don't have an account? Sign up",
@@ -317,13 +426,21 @@ fun MainHome(
 
     LaunchedEffect(uid) {
         profileLoaded = false
-        db.collection("users").document(uid).get()
+
+        db.collection("users")
+            .document(uid)
+            .get()
             .addOnSuccessListener { document ->
                 userName = document.getString("name") ?: "Khahish User"
                 username = document.getString("username") ?: ""
                 bio = document.getString("bio") ?: ""
                 photoUrl = document.getString("photoUrl") ?: ""
                 profileLoaded = true
+
+                // Profile load hone ke baad online status update
+                db.collection("users")
+                    .document(uid)
+                    .update("isOnline", true)
             }
             .addOnFailureListener {
                 openingError = it.localizedMessage ?: "Profile load nahi hui."
@@ -342,7 +459,10 @@ fun MainHome(
     }
 
     if (!profileLoaded) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier.fillMaxSize().statusBarsPadding(),
+            contentAlignment = Alignment.Center
+        ) {
             CircularProgressIndicator(color = Green)
         }
         return
@@ -391,6 +511,7 @@ fun MainHome(
     }
 
     val tabs = listOf("Chats", "Contacts", "Updates", "Calls", "Settings")
+
     val icons = listOf(
         Icons.Default.Chat,
         Icons.Default.Search,
@@ -403,18 +524,31 @@ fun MainHome(
         containerColor = Pale,
         topBar = {
             Column(
-                Modifier.fillMaxWidth()
+                Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
                     .background(Color.White)
                     .padding(horizontal = 18.dp, vertical = 14.dp)
             ) {
-                Text("Khahish", fontSize = 25.sp,
-                    fontWeight = FontWeight.Bold, color = Green)
-                Text("Welcome, $userName  •  @$username",
-                    color = Muted, fontSize = 12.sp)
+                Text(
+                    "Khahish",
+                    fontSize = 25.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Green
+                )
+
+                Text(
+                    "Welcome, $userName  •  @$username",
+                    color = Muted,
+                    fontSize = 12.sp
+                )
             }
         },
         bottomBar = {
-            NavigationBar(containerColor = Color.White) {
+            NavigationBar(
+                containerColor = Color.White,
+                windowInsets = NavigationBarDefaults.windowInsets
+            ) {
                 tabs.forEachIndexed { index, label ->
                     NavigationBarItem(
                         selected = selectedTab == index,
@@ -443,7 +577,9 @@ fun MainHome(
                     onChatClick = { chat ->
                         selectedConversation = chat.id
                         selectedUser = UserProfile(
-                            chat.otherUid, chat.otherName, ""
+                            chat.otherUid,
+                            chat.otherName,
+                            ""
                         )
                     }
                 )
@@ -456,6 +592,7 @@ fun MainHome(
 
                         val participants =
                             listOf(uid, otherUser.uid).sorted()
+
                         val conversationId =
                             participants.joinToString("_")
 
@@ -502,7 +639,8 @@ fun MainHome(
                 Text(
                     openingError,
                     color = Color.Red,
-                    modifier = Modifier.align(Alignment.BottomCenter)
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
                         .padding(12.dp)
                 )
             }
@@ -529,12 +667,18 @@ fun EditProfileScreen(
     var saving by remember { mutableStateOf(false) }
 
     Column(
-        Modifier.fillMaxSize().background(Pale).padding(18.dp)
+        Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .background(Pale)
+            .padding(18.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) {
                 Icon(Icons.Default.ArrowBack, contentDescription = "Back")
             }
+
             Text(
                 "Edit Profile",
                 fontSize = 22.sp,
@@ -592,6 +736,7 @@ fun EditProfileScreen(
         )
 
         Spacer(Modifier.height(6.dp))
+
         Text(
             "Tasveer ka direct image URL yahan paste karein.",
             color = Muted,
@@ -633,7 +778,8 @@ fun EditProfileScreen(
                     "photoUrl" to cleanPhoto
                 )
 
-                db.collection("users").document(uid)
+                db.collection("users")
+                    .document(uid)
                     .set(updates, SetOptions.merge())
                     .addOnSuccessListener {
                         saving = false
@@ -678,11 +824,22 @@ fun FeaturePlaceholder(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Icon(icon, contentDescription = null,
-            tint = Green, modifier = Modifier.size(58.dp))
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = Green,
+            modifier = Modifier.size(58.dp)
+        )
+
         Spacer(Modifier.height(16.dp))
-        Text(title, fontSize = 23.sp,
-            fontWeight = FontWeight.Bold, color = Ink)
+
+        Text(
+            title,
+            fontSize = 23.sp,
+            fontWeight = FontWeight.Bold,
+            color = Ink
+        )
+
         Spacer(Modifier.height(8.dp))
         Text(description, color = Muted)
     }
@@ -700,15 +857,29 @@ fun UsernameSetupScreen(
     var loading by remember { mutableStateOf(false) }
 
     Column(
-        Modifier.fillMaxSize().background(Pale).padding(24.dp),
+        Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .background(Pale)
+            .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text("Choose your username", fontSize = 24.sp,
-            fontWeight = FontWeight.Bold, color = Ink)
+        Text(
+            "Choose your username",
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold,
+            color = Ink
+        )
+
         Spacer(Modifier.height(8.dp))
-        Text("Doosre log aapko isi username se search karenge.",
-            color = Muted)
+
+        Text(
+            "Doosre log aapko isi username se search karenge.",
+            color = Muted
+        )
+
         Spacer(Modifier.height(20.dp))
 
         OutlinedTextField(
@@ -724,8 +895,12 @@ fun UsernameSetupScreen(
         )
 
         Spacer(Modifier.height(8.dp))
-        Text("3–20 characters. Letters, numbers aur underscore.",
-            color = Muted, fontSize = 12.sp)
+
+        Text(
+            "3–20 characters. Letters, numbers aur underscore.",
+            color = Muted,
+            fontSize = 12.sp
+        )
 
         if (error.isNotBlank()) {
             Spacer(Modifier.height(10.dp))
@@ -780,13 +955,15 @@ fun UsernameSetupScreen(
                         mapOf("username" to value),
                         SetOptions.merge()
                     )
+
                     null
                 }.addOnSuccessListener {
                     loading = false
                     onComplete(value)
                 }.addOnFailureListener {
                     loading = false
-                    error = it.localizedMessage ?: "Username save nahi ho saka."
+                    error = it.localizedMessage
+                        ?: "Username save nahi ho saka."
                 }
             },
             enabled = !loading,
@@ -818,8 +995,13 @@ fun UsernameSearchScreen(
     var error by remember { mutableStateOf("") }
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Find people", fontSize = 21.sp,
-            fontWeight = FontWeight.Bold, color = Ink)
+        Text(
+            "Find people",
+            fontSize = 21.sp,
+            fontWeight = FontWeight.Bold,
+            color = Ink
+        )
+
         Spacer(Modifier.height(14.dp))
 
         OutlinedTextField(
@@ -854,7 +1036,9 @@ fun UsernameSearchScreen(
                 result = null
                 error = ""
 
-                db.collection("usernames").document(value).get()
+                db.collection("usernames")
+                    .document(value)
+                    .get()
                     .addOnSuccessListener { document ->
                         loading = false
                         searched = true
@@ -873,7 +1057,8 @@ fun UsernameSearchScreen(
                     }
                     .addOnFailureListener {
                         loading = false
-                        error = it.localizedMessage ?: "Search nahi ho saki."
+                        error = it.localizedMessage
+                            ?: "Search nahi ho saki."
                     }
             },
             enabled = !loading,
@@ -902,21 +1087,34 @@ fun UsernameSearchScreen(
 
         result?.let { user ->
             Spacer(Modifier.height(18.dp))
+
             Row(
-                Modifier.fillMaxWidth()
+                Modifier
+                    .fillMaxWidth()
                     .background(Color.White, RoundedCornerShape(14.dp))
                     .clickable { onUserClick(user) }
                     .padding(14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 UserAvatar(user.name)
+
                 Spacer(Modifier.width(12.dp))
+
                 Column(Modifier.weight(1f)) {
-                    Text(user.name, fontWeight = FontWeight.Bold, color = Ink)
+                    Text(
+                        user.name,
+                        fontWeight = FontWeight.Bold,
+                        color = Ink
+                    )
+
                     Text("@${user.username}", color = Muted)
                 }
-                Icon(Icons.Default.Chat,
-                    contentDescription = "Open chat", tint = Green)
+
+                Icon(
+                    Icons.Default.Chat,
+                    contentDescription = "Open chat",
+                    tint = Green
+                )
             }
         }
     }
@@ -937,6 +1135,7 @@ fun RecentChatsScreen(
             db.collection("conversations")
                 .whereArrayContains("participants", uid)
                 .addSnapshotListener { snapshot, exception ->
+
                     if (exception != null) {
                         loading = false
                         error = exception.localizedMessage
@@ -947,6 +1146,7 @@ fun RecentChatsScreen(
 
                         val currentIds =
                             snapshot.documents.map { it.id }.toSet()
+
                         chats = chats.filter { it.id in currentIds }
 
                         snapshot.documents.forEach { document ->
@@ -986,50 +1186,87 @@ fun RecentChatsScreen(
                     }
                 }
 
-        onDispose { registration.remove() }
+        onDispose {
+            registration.remove()
+        }
     }
 
     Column(Modifier.fillMaxSize().padding(14.dp)) {
-        Text("Recent Chats", fontSize = 20.sp,
-            fontWeight = FontWeight.Bold, color = Ink)
+        Text(
+            "Recent Chats",
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            color = Ink
+        )
+
         Spacer(Modifier.height(12.dp))
 
         when {
-            loading -> Box(Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = Green)
+            loading -> {
+                Box(
+                    Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = Green)
+                }
             }
 
-            error.isNotBlank() -> Text(error, color = Color.Red)
-
-            chats.isEmpty() -> Box(Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center) {
-                Text("Abhi koi chat nahi. Contacts se user dhoondein.",
-                    color = Muted)
+            error.isNotBlank() -> {
+                Text(error, color = Color.Red)
             }
 
-            else -> LazyColumn {
-                items(chats, key = { it.id }) { chat ->
-                    Row(
-                        Modifier.fillMaxWidth()
-                            .clickable { onChatClick(chat) }
-                            .padding(vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        UserAvatar(chat.otherName)
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(chat.otherName, color = Ink,
-                                fontWeight = FontWeight.SemiBold)
-                            Text(chat.lastMessage, color = Muted,
-                                fontSize = 13.sp, maxLines = 1)
+            chats.isEmpty() -> {
+                Box(
+                    Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "Abhi koi chat nahi. Contacts se user dhoondein.",
+                        color = Muted
+                    )
+                }
+            }
+
+            else -> {
+                LazyColumn {
+                    items(chats, key = { it.id }) { chat ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { onChatClick(chat) }
+                                .padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            UserAvatar(chat.otherName)
+
+                            Spacer(Modifier.width(12.dp))
+
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    chat.otherName,
+                                    color = Ink,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+
+                                Text(
+                                    chat.lastMessage,
+                                    color = Muted,
+                                    fontSize = 13.sp,
+                                    maxLines = 1
+                                )
+                            }
+
+                            if (chat.lastMessageAt > 0) {
+                                Text(
+                                    formatTime(chat.lastMessageAt),
+                                    color = Muted,
+                                    fontSize = 10.sp
+                                )
+                            }
                         }
-                        if (chat.lastMessageAt > 0) {
-                            Text(formatTime(chat.lastMessageAt),
-                                color = Muted, fontSize = 10.sp)
-                        }
+
+                        HorizontalDivider(color = Color(0xFFE8EFED))
                     }
-                    HorizontalDivider(color = Color(0xFFE8EFED))
                 }
             }
         }
@@ -1049,6 +1286,26 @@ fun ConversationScreen(
     var sending by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
 
+    var otherOnline by remember { mutableStateOf(false) }
+    var otherLastSeen by remember { mutableLongStateOf(0L) }
+
+    // Doosre user ka live online status sunna
+    DisposableEffect(otherUser.uid) {
+        val presenceRegistration = db.collection("users")
+            .document(otherUser.uid)
+            .addSnapshotListener { document, exception ->
+
+                if (exception == null && document != null && document.exists()) {
+                    otherOnline = document.getBoolean("isOnline") ?: false
+                    otherLastSeen = document.getLong("lastSeenAt") ?: 0L
+                }
+            }
+
+        onDispose {
+            presenceRegistration.remove()
+        }
+    }
+
     DisposableEffect(conversationId, currentUid) {
         val messagesRef = db.collection("conversations")
             .document(conversationId)
@@ -1066,6 +1323,7 @@ fun ConversationScreen(
                     val loadedMessages = snapshot.documents.mapNotNull { document ->
                         val sender = document.getString("senderId")
                             ?: return@mapNotNull null
+
                         val text = document.getString("text")
                             ?: return@mapNotNull null
 
@@ -1114,14 +1372,23 @@ fun ConversationScreen(
                 }
             }
 
-        onDispose { registration.remove() }
+        onDispose {
+            registration.remove()
+        }
     }
 
     Column(
-        Modifier.fillMaxSize().background(Pale)
+        Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .background(Pale)
     ) {
         Row(
-            Modifier.fillMaxWidth().background(Color.White).padding(10.dp),
+            Modifier
+                .fillMaxWidth()
+                .background(Color.White)
+                .padding(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
@@ -1129,25 +1396,43 @@ fun ConversationScreen(
             }
 
             UserAvatar(otherUser.name)
+
             Spacer(Modifier.width(10.dp))
 
             Column {
-                Text(otherUser.name, fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold, color = Ink)
-                if (otherUser.username.isNotBlank()) {
-                    Text("@${otherUser.username}",
-                        color = Muted, fontSize = 11.sp)
-                }
+                Text(
+                    otherUser.name,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Ink
+                )
+
+                Text(
+                    if (otherOnline) {
+                        "● Online"
+                    } else if (otherLastSeen > 0L) {
+                        "Last seen ${formatLastSeen(otherLastSeen)}"
+                    } else {
+                        "Offline"
+                    },
+                    color = if (otherOnline) Green else Muted,
+                    fontSize = 11.sp
+                )
             }
         }
 
         if (error.isNotBlank()) {
-            Text(error, color = Color.Red,
-                modifier = Modifier.padding(8.dp))
+            Text(
+                error,
+                color = Color.Red,
+                modifier = Modifier.padding(8.dp)
+            )
         }
 
         LazyColumn(
-            modifier = Modifier.weight(1f).fillMaxWidth()
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
                 .padding(horizontal = 12.dp),
             reverseLayout = false
         ) {
@@ -1155,21 +1440,29 @@ fun ConversationScreen(
                 val mine = item.senderId == currentUid
 
                 Column(
-                    Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                    horizontalAlignment =
-                        if (mine) Alignment.End else Alignment.Start
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    horizontalAlignment = if (mine) {
+                        Alignment.End
+                    } else {
+                        Alignment.Start
+                    }
                 ) {
                     Column(
-                        Modifier.widthIn(max = 290.dp)
+                        Modifier
+                            .widthIn(max = 290.dp)
                             .background(
                                 if (mine) Green else Color.White,
                                 RoundedCornerShape(16.dp)
                             )
                             .padding(horizontal = 13.dp, vertical = 9.dp)
                     ) {
-                        Text(item.text,
+                        Text(
+                            item.text,
                             color = if (mine) Color.White else Ink,
-                            fontSize = 15.sp)
+                            fontSize = 15.sp
+                        )
 
                         Spacer(Modifier.height(4.dp))
 
@@ -1180,9 +1473,11 @@ fun ConversationScreen(
                             Text(
                                 if (item.createdAt > 0)
                                     formatTime(item.createdAt) else "",
-                                color = if (mine)
+                                color = if (mine) {
                                     Color.White.copy(alpha = 0.75f)
-                                else Muted,
+                                } else {
+                                    Muted
+                                },
                                 fontSize = 10.sp
                             )
 
@@ -1214,7 +1509,10 @@ fun ConversationScreen(
         }
 
         Row(
-            Modifier.fillMaxWidth().background(Color.White).padding(10.dp),
+            Modifier
+                .fillMaxWidth()
+                .background(Color.White)
+                .padding(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             OutlinedTextField(
@@ -1282,8 +1580,11 @@ fun ConversationScreen(
                         strokeWidth = 2.dp
                     )
                 } else {
-                    Icon(Icons.Default.Send,
-                        contentDescription = "Send", tint = Green)
+                    Icon(
+                        Icons.Default.Send,
+                        contentDescription = "Send",
+                        tint = Green
+                    )
                 }
             }
         }
@@ -1308,16 +1609,16 @@ fun UserAvatar(
         )
     } else {
         Box(
-            Modifier.size(size.dp).background(
-                Green.copy(alpha = 0.14f), CircleShape
-            ),
+            Modifier
+                .size(size.dp)
+                .background(Green.copy(alpha = 0.14f), CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 name.take(1).uppercase().ifBlank { "K" },
                 color = Green,
                 fontWeight = FontWeight.Bold,
-                fontSize = (size / 2.5).sp
+                fontSize = (size.toFloat() / 2.5f).sp
             )
         }
     }
@@ -1326,6 +1627,13 @@ fun UserAvatar(
 fun formatTime(time: Long): String {
     return SimpleDateFormat(
         "hh:mm a",
+        Locale.getDefault()
+    ).format(Date(time))
+}
+
+fun formatLastSeen(time: Long): String {
+    return SimpleDateFormat(
+        "dd MMM, hh:mm a",
         Locale.getDefault()
     ).format(Date(time))
 }
@@ -1341,25 +1649,36 @@ fun SettingsPage(
     onLogout: () -> Unit
 ) {
     Column(Modifier.fillMaxSize().padding(18.dp)) {
-        Text("Settings", fontSize = 23.sp,
-            fontWeight = FontWeight.Bold, color = Ink)
+        Text(
+            "Settings",
+            fontSize = 23.sp,
+            fontWeight = FontWeight.Bold,
+            color = Ink
+        )
 
         Spacer(Modifier.height(20.dp))
 
         Row(
-            Modifier.fillMaxWidth()
+            Modifier
+                .fillMaxWidth()
                 .background(Color.White, RoundedCornerShape(14.dp))
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             UserAvatar(name, photoUrl, 64)
+
             Spacer(Modifier.width(14.dp))
 
             Column(Modifier.weight(1f)) {
-                Text(name.ifBlank { "Khahish User" },
-                    fontWeight = FontWeight.Bold, color = Ink)
+                Text(
+                    name.ifBlank { "Khahish User" },
+                    fontWeight = FontWeight.Bold,
+                    color = Ink
+                )
+
                 Text("@$username", color = Muted, fontSize = 12.sp)
                 Text(email, color = Muted, fontSize = 12.sp)
+
                 if (bio.isNotBlank()) {
                     Spacer(Modifier.height(5.dp))
                     Text(bio, color = Ink, fontSize = 13.sp)
@@ -1370,35 +1689,59 @@ fun SettingsPage(
         Spacer(Modifier.height(12.dp))
 
         Row(
-            Modifier.fillMaxWidth()
+            Modifier
+                .fillMaxWidth()
                 .clickable { onEditProfile() }
                 .background(Color.White, RoundedCornerShape(12.dp))
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Default.Edit,
-                contentDescription = null, tint = Green)
+            Icon(
+                Icons.Default.Edit,
+                contentDescription = null,
+                tint = Green
+            )
+
             Spacer(Modifier.width(12.dp))
-            Text("Edit Profile", color = Ink,
-                fontWeight = FontWeight.SemiBold)
+
+            Text(
+                "Edit Profile",
+                color = Ink,
+                fontWeight = FontWeight.SemiBold
+            )
+
             Spacer(Modifier.weight(1f))
-            Icon(Icons.Default.ChevronRight,
-                contentDescription = null, tint = Muted)
+
+            Icon(
+                Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = Muted
+            )
         }
 
         Spacer(Modifier.height(12.dp))
 
         Row(
-            Modifier.fillMaxWidth().clickable { onLogout() }
+            Modifier
+                .fillMaxWidth()
+                .clickable { onLogout() }
                 .background(Color.White, RoundedCornerShape(12.dp))
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Default.Logout,
-                contentDescription = null, tint = Color.Red)
+            Icon(
+                Icons.Default.Logout,
+                contentDescription = null,
+                tint = Color.Red
+            )
+
             Spacer(Modifier.width(12.dp))
-            Text("Logout", color = Color.Red,
-                fontWeight = FontWeight.SemiBold)
+
+            Text(
+                "Logout",
+                color = Color.Red,
+                fontWeight = FontWeight.SemiBold
+            )
         }
     }
 }
