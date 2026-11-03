@@ -48,7 +48,6 @@ jobs:
 
           PROJECT_DIR=$(dirname "$SETTINGS")
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
           echo "Project found: $PROJECT_DIR"
 
       - name: Copy updated MainActivity
@@ -56,7 +55,7 @@ jobs:
           TARGET="$PROJECT_DIR/app/src/main/java/com/khahish/app"
           mkdir -p "$TARGET"
           cp MainActivity.kt "$TARGET/MainActivity.kt"
-          echo "Updated MainActivity copied successfully"
+          echo "MainActivity copied successfully"
 
       - name: Create Khahish App Icon
         run: |
@@ -149,7 +148,7 @@ jobs:
           root_text = root.read_text()
           app_text = app.read_text()
 
-          # Update both Kotlin plugins to 2.2.21
+          # Set Kotlin plugins to 2.4.0
           for plugin in [
               "org.jetbrains.kotlin.android",
               "org.jetbrains.kotlin.plugin.compose"
@@ -161,19 +160,23 @@ jobs:
 
               root_text, count = re.subn(
                   pattern,
-                  r'\g<1>2.2.21\g<2>',
+                  r'\g<1>2.4.0\g<2>',
                   root_text
               )
 
               if count != 1:
-                  raise Exception("Could not update Kotlin plugin: " + plugin)
+                  raise Exception("Kotlin plugin not found: " + plugin)
 
           # Add Google Services plugin to root Gradle
           if "com.google.gms.google-services" not in root_text:
+              anchor = '    id("org.jetbrains.kotlin.plugin.compose") version "2.4.0" apply false'
+
+              if anchor not in root_text:
+                  raise Exception("Compose plugin anchor not found")
+
               root_text = root_text.replace(
-                  '    id("org.jetbrains.kotlin.plugin.compose") version "2.2.21" apply false',
-                  '    id("org.jetbrains.kotlin.plugin.compose") version "2.2.21" apply false\n'
-                  '    id("com.google.gms.google-services") version "4.4.2" apply false'
+                  anchor,
+                  anchor + '\n    id("com.google.gms.google-services") version "4.5.0" apply false'
               )
 
           root.write_text(root_text)
@@ -183,7 +186,7 @@ jobs:
               anchor = '    id("org.jetbrains.kotlin.plugin.compose")'
 
               if anchor not in app_text:
-                  raise Exception("Compose plugin not found in app Gradle")
+                  raise Exception("App Compose plugin not found")
 
               app_text = app_text.replace(
                   anchor,
@@ -191,10 +194,15 @@ jobs:
                   1
               )
 
-          # Java 17 compatibility
+          # Java 17
           if "compileOptions {" not in app_text:
+              anchor = "    buildFeatures { compose = true }"
+
+              if anchor not in app_text:
+                  raise Exception("Build features block not found")
+
               app_text = app_text.replace(
-                  "    buildFeatures { compose = true }",
+                  anchor,
                   """    compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
                   targetCompatibility = JavaVersion.VERSION_17
@@ -217,7 +225,7 @@ jobs:
                   1
               )
 
-          # Firebase dependencies
+          # Firebase Auth and Firestore
           if "firebase-bom" not in app_text:
               app_text = app_text.replace(
                   "dependencies {",
@@ -230,9 +238,10 @@ jobs:
 
           app.write_text(app_text)
 
-          print("Kotlin 2.2.21 configured")
-          print("Firebase Auth and Firestore configured")
-          print("Google Services plugin configured")
+          print("Kotlin 2.4.0 configured")
+          print("Firebase Auth configured")
+          print("Firestore configured")
+          print("Google Services configured")
           PY
 
       - name: Build Khahish APK
