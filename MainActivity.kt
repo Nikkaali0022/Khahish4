@@ -74,19 +74,25 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updatePresence(uid: String, online: Boolean) {
-        val updates = mutableMapOf<String, Any>(
-            "isOnline" to online
-        )
+    val updates = mutableMapOf<String, Any>(
+        "isOnline" to online
+    )
 
-        if (!online) {
-            updates["lastSeenAt"] = System.currentTimeMillis()
-        }
-
-        db.collection("users")
-            .document(uid)
-            .update(updates)
+    if (!online) {
+        updates["lastSeenAt"] = System.currentTimeMillis()
     }
 
+    db.collection("users")
+        .document(uid)
+        .set(updates, SetOptions.merge())
+        .addOnFailureListener { exception ->
+            android.util.Log.e(
+                "KhahishPresence",
+                "Presence update failed",
+                exception
+            )
+        }
+}
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -1432,12 +1438,13 @@ fun ConversationScreen(
     }
 
     Column(
-        Modifier
-            .fillMaxSize()
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .background(Pale)
-    ) {
+    Modifier
+        .fillMaxSize()
+        .statusBarsPadding()
+        .navigationBarsPadding()
+        .imePadding()
+        .background(Pale)
+) {
         Row(
             Modifier
                 .fillMaxWidth()
