@@ -29,6 +29,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.SetOptions
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -88,14 +89,15 @@ fun KhahishApp() {
             surface = Color.White
         )
     ) {
-        if (currentUser == null) {
+        val user = currentUser
+        if (user == null) {
             AuthScreen(auth, db)
         } else {
             MainHome(
                 auth = auth,
                 db = db,
-                uid = currentUser!!.uid,
-                email = currentUser!!.email ?: ""
+                uid = user.uid,
+                email = user.email ?: ""
             )
         }
     }
@@ -234,7 +236,6 @@ fun AuthScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
                     ).addOnCompleteListener { task ->
                         if (task.isSuccessful) {
                             val user = auth.currentUser
-
                             if (user != null) {
                                 val profile = hashMapOf(
                                     "uid" to user.uid,
@@ -292,9 +293,7 @@ fun AuthScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
                     strokeWidth = 2.dp
                 )
             } else {
-                Text(
-                    if (isSignup) "Create Account" else "Login"
-                )
+                Text(if (isSignup) "Create Account" else "Login")
             }
         }
 
@@ -329,14 +328,15 @@ fun MainHome(
     var profileLoaded by remember { mutableStateOf(false) }
 
     LaunchedEffect(uid) {
+        profileLoaded = false
         db.collection("users").document(uid).get()
             .addOnSuccessListener { document ->
                 userName = document.getString("name") ?: "Khahish User"
+                username = document.getString("username") ?: ""
                 profileLoaded = true
             }
             .addOnFailureListener {
-                openingError = it.localizedMessage
-                    ?: "Profile load nahi hui."
+                openingError = it.localizedMessage ?: "Profile load nahi hui."
                 profileLoaded = true
             }
     }
@@ -348,10 +348,7 @@ fun MainHome(
     }
 
     if (!profileLoaded) {
-        Box(
-            Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(color = Green)
         }
         return
@@ -362,9 +359,7 @@ fun MainHome(
             uid = uid,
             name = userName,
             db = db,
-            onComplete = { value ->
-                username = value
-            }
+            onComplete = { username = it }
         )
         return
     }
@@ -458,25 +453,19 @@ fun MainHome(
                     onUserClick = { otherUser ->
                         openingError = ""
 
-                        val participants = listOf(
-                            uid,
-                            otherUser.uid
-                        ).sorted()
-
-                        val conversationId =
-                            participants.joinToString("_")
+                        val participants = listOf(uid, otherUser.uid).sorted()
+                        val conversationId = participants.joinToString("_")
 
                         val conversationRef = db.collection("conversations")
                             .document(conversationId)
 
                         val conversation = hashMapOf(
-                            "participants" to participants,
-                            "createdAt" to System.currentTimeMillis()
+                            "participants" to participants
                         )
 
                         conversationRef.set(
                             conversation,
-                            com.google.firebase.firestore.SetOptions.merge()
+                            SetOptions.merge()
                         ).addOnSuccessListener {
                             selectedConversation = conversationId
                             selectedUser = otherUser
@@ -582,14 +571,18 @@ fun UsernameSetupScreen(
                 loading = true
                 error = ""
 
-                val usernameRef = db.collection("usernames")
-                    .document(value)
-
-                val mappingRef = db.collection("usernamesByUid")
-                    .document(uid)
+                val usernameRef = db.collection("usernames").document(value)
+                val mappingRef = db.collection("usernamesByUid").document(uid)
+                val userRef = db.collection("users").document(uid)
 
                 db.runTransaction { transaction ->
                     val existing = transaction.get(usernameRef)
+                    val oldProfile = transaction.get(userRef)
+                    val oldUsername = oldProfile.getString("username")
+
+                    if (oldUsername == value) {
+                        throw IllegalStateException("Ye username aapka pehle se hai.")
+                    }
 
                     if (existing.exists()) {
                         throw IllegalStateException(
@@ -605,11 +598,10 @@ fun UsernameSetupScreen(
 
                     transaction.set(usernameRef, data)
                     transaction.set(mappingRef, data)
-
                     transaction.set(
-                        db.collection("users").document(uid),
+                        userRef,
                         mapOf("username" to value),
-                        com.google.firebase.firestore.SetOptions.merge()
+                        SetOptions.merge()
                     )
 
                     null
@@ -618,17 +610,14 @@ fun UsernameSetupScreen(
                     onComplete(value)
                 }.addOnFailureListener {
                     loading = false
-                    error = it.localizedMessage
-                        ?: "Username save nahi ho saka."
+                    error = it.localizedMessage ?: "Username save nahi ho saka."
                 }
             },
             enabled = !loading,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(50.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Green
-            )
+            colors = ButtonDefaults.buttonColors(containerColor = Green)
         ) {
             if (loading) {
                 CircularProgressIndicator(
@@ -688,9 +677,7 @@ fun UsernameSearchScreen(
 
         Button(
             onClick = {
-                val value = search.trim()
-                    .removePrefix("@")
-                    .lowercase()
+                val value = search.trim().removePrefix("@").lowercase()
 
                 if (!value.matches(Regex("^[a-z0-9_]{3,20}$"))) {
                     error = "Valid username enter karein."
@@ -702,9 +689,7 @@ fun UsernameSearchScreen(
                 result = null
                 error = ""
 
-                db.collection("usernames")
-                    .document(value)
-                    .get()
+                db.collection("usernames").document(value).get()
                     .addOnSuccessListener { document ->
                         loading = false
                         searched = true
@@ -716,22 +701,19 @@ fun UsernameSearchScreen(
 
                             if (id == currentUid) {
                                 error = "Ye aapka apna username hai."
-                            } else {
+                            } else if (id.isNotBlank()) {
                                 result = UserProfile(id, name, value)
                             }
                         }
                     }
                     .addOnFailureListener {
                         loading = false
-                        error = it.localizedMessage
-                            ?: "Search nahi ho saki."
+                        error = it.localizedMessage ?: "Search nahi ho saki."
                     }
             },
             enabled = !loading,
             modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Green
-            )
+            colors = ButtonDefaults.buttonColors(containerColor = Green)
         ) {
             if (loading) {
                 CircularProgressIndicator(
@@ -765,15 +747,10 @@ fun UsernameSearchScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 UserAvatar(user.name)
-
                 Spacer(Modifier.width(12.dp))
 
                 Column(Modifier.weight(1f)) {
-                    Text(
-                        user.name,
-                        fontWeight = FontWeight.Bold,
-                        color = Ink
-                    )
+                    Text(user.name, fontWeight = FontWeight.Bold, color = Ink)
                     Text("@${user.username}", color = Muted)
                 }
 
@@ -810,6 +787,9 @@ fun RecentChatsScreen(
                         loading = false
                         error = ""
 
+                        val currentIds = snapshot.documents.map { it.id }.toSet()
+                        chats = chats.filter { it.id in currentIds }
+
                         snapshot.documents.forEach { document ->
                             val participants =
                                 document.get("participants") as? List<*>
@@ -831,19 +811,15 @@ fun RecentChatsScreen(
                                         id = document.id,
                                         otherUid = otherUid,
                                         otherName = name,
-                                        lastMessage = document.getString(
-                                            "lastMessage"
-                                        ) ?: "Start chatting",
-                                        lastMessageAt = document.getLong(
-                                            "lastMessageAt"
-                                        ) ?: document.getLong("createdAt") ?: 0L
+                                        lastMessage = document.getString("lastMessage")
+                                            ?: "Start chatting",
+                                        lastMessageAt = document.getLong("lastMessageAt")
+                                            ?: 0L
                                     )
 
-                                    chats = (chats.filterNot {
-                                        it.id == chat.id
-                                    } + chat).sortedByDescending {
-                                        it.lastMessageAt
-                                    }
+                                    chats = (
+                                        chats.filterNot { it.id == chat.id } + chat
+                                    ).sortedByDescending { it.lastMessageAt }
                                 }
                         }
                     }
@@ -896,7 +872,6 @@ fun RecentChatsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         UserAvatar(chat.otherName)
-
                         Spacer(Modifier.width(12.dp))
 
                         Column(Modifier.weight(1f)) {
@@ -942,8 +917,6 @@ fun ConversationScreen(
     var sending by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
 
-    BackHandler(onBack = onBack)
-
     DisposableEffect(conversationId) {
         val registration = db.collection("conversations")
             .document(conversationId)
@@ -961,12 +934,7 @@ fun ConversationScreen(
                             ?: return@mapNotNull null
                         val time = document.getLong("createdAt") ?: 0L
 
-                        Message(
-                            document.id,
-                            sender,
-                            text,
-                            time
-                        )
+                        Message(document.id, sender, text, time)
                     }
                     error = ""
                 }
@@ -992,7 +960,6 @@ fun ConversationScreen(
             }
 
             UserAvatar(otherUser.name)
-
             Spacer(Modifier.width(10.dp))
 
             Column {
@@ -1003,7 +970,11 @@ fun ConversationScreen(
                     color = Ink
                 )
                 if (otherUser.username.isNotBlank()) {
-                    Text("@${otherUser.username}", color = Muted, fontSize = 11.sp)
+                    Text(
+                        "@${otherUser.username}",
+                        color = Muted,
+                        fontSize = 11.sp
+                    )
                 }
             }
         }
@@ -1020,8 +991,7 @@ fun ConversationScreen(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp),
-            reverseLayout = false
+                .padding(horizontal = 12.dp)
         ) {
             items(messages, key = { it.id }) { item ->
                 val mine = item.senderId == currentUid
@@ -1030,11 +1000,7 @@ fun ConversationScreen(
                     Modifier
                         .fillMaxWidth()
                         .padding(vertical = 4.dp),
-                    horizontalAlignment = if (mine) {
-                        Alignment.End
-                    } else {
-                        Alignment.Start
-                    }
+                    horizontalAlignment = if (mine) Alignment.End else Alignment.Start
                 ) {
                     Column(
                         Modifier
@@ -1054,8 +1020,7 @@ fun ConversationScreen(
                         Spacer(Modifier.height(4.dp))
 
                         Text(
-                            if (item.createdAt > 0) formatTime(item.createdAt)
-                            else "",
+                            if (item.createdAt > 0) formatTime(item.createdAt) else "",
                             color = if (mine) Color.White.copy(alpha = 0.75f)
                             else Muted,
                             fontSize = 10.sp,
@@ -1156,7 +1121,7 @@ fun UserAvatar(name: String) {
         contentAlignment = Alignment.Center
     ) {
         Text(
-            name.take(1).uppercase(),
+            name.take(1).uppercase().ifBlank { "K" },
             color = Green,
             fontWeight = FontWeight.Bold,
             fontSize = 19.sp
@@ -1200,7 +1165,6 @@ fun SettingsPage(
             verticalAlignment = Alignment.CenterVertically
         ) {
             UserAvatar(name)
-
             Spacer(Modifier.width(14.dp))
 
             Column {
