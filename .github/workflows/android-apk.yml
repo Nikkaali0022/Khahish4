@@ -134,7 +134,7 @@ jobs:
         run: |
           cp google-services.json "$PROJECT_DIR/app/google-services.json"
 
-      - name: Configure Firebase and Kotlin
+      - name: Configure Firebase, Kotlin and Coil
         run: |
           python3 - <<'PY'
           import os
@@ -148,7 +148,7 @@ jobs:
           root_text = root.read_text()
           app_text = app.read_text()
 
-          # Set Kotlin plugins to 2.4.0
+          # Configure Kotlin plugins
           for plugin in [
               "org.jetbrains.kotlin.android",
               "org.jetbrains.kotlin.plugin.compose"
@@ -167,7 +167,7 @@ jobs:
               if count != 1:
                   raise Exception("Kotlin plugin not found: " + plugin)
 
-          # Add Google Services plugin to root Gradle
+          # Add Google Services plugin
           if "com.google.gms.google-services" not in root_text:
               anchor = '    id("org.jetbrains.kotlin.plugin.compose") version "2.4.0" apply false'
 
@@ -236,12 +236,22 @@ jobs:
                   1
               )
 
+          # Coil image loading
+          if "io.coil-kt:coil-compose" not in app_text:
+              app_text = app_text.replace(
+                  "dependencies {",
+                  """dependencies {
+              implementation("io.coil-kt:coil-compose:2.7.0")""",
+                  1
+              )
+
           app.write_text(app_text)
 
           print("Kotlin 2.4.0 configured")
           print("Firebase Auth configured")
           print("Firestore configured")
           print("Google Services configured")
+          print("Coil image loading configured")
           PY
 
       - name: Build Khahish APK
