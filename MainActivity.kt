@@ -1,4 +1,3 @@
-
 package com.khahish.app
 
 import android.os.Bundle
@@ -29,6 +28,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.SetOptions
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -334,7 +334,6 @@ fun MainHome(
     var selectedConversation by remember { mutableStateOf("") }
     var openingError by remember { mutableStateOf("") }
 
-    // Ensure older accounts also get a public profile.
     LaunchedEffect(uid) {
         db.collection("users")
             .document(uid)
@@ -351,6 +350,14 @@ fun MainHome(
                 db.collection("publicProfiles")
                     .document(uid)
                     .set(profile)
+                    .addOnFailureListener {
+                        openingError = it.localizedMessage
+                            ?: "Public profile update nahi ho saki."
+                    }
+            }
+            .addOnFailureListener {
+                openingError = it.localizedMessage
+                    ?: "User profile load nahi ho saki."
             }
     }
 
@@ -431,38 +438,30 @@ fun MainHome(
                     onUserClick = { otherUser ->
                         openingError = ""
 
-                        val conversationId = listOf(uid, otherUser.uid)
-                            .sorted()
-                            .joinToString("_")
+                        val participants = listOf(uid, otherUser.uid).sorted()
+
+                        val conversationId = participants.joinToString("_")
 
                         val conversationRef = db.collection("conversations")
                             .document(conversationId)
 
-                        conversationRef.get()
-                            .addOnSuccessListener { document ->
-                                if (document.exists()) {
-                                    selectedConversation = conversationId
-                                    selectedUser = otherUser
-                                } else {
-                                    val conversation = hashMapOf(
-                                        "participants" to listOf(uid, otherUser.uid),
-                                        "createdAt" to System.currentTimeMillis(),
-                                        "lastMessage" to ""
-                                    )
+                        // Direct merge: pehle get() nahi karte,
+                        // is liye missing conversation par read permission error nahi aata.
+                        // Sirf participants field set hoti hai; purane messages/lastMessage safe rehte hain.
+                        val conversation = hashMapOf(
+                            "participants" to participants
+                        )
 
-                                    conversationRef.set(conversation)
-                                        .addOnSuccessListener {
-                                            selectedConversation = conversationId
-                                            selectedUser = otherUser
-                                        }
-                                        .addOnFailureListener {
-                                            openingError = it.localizedMessage
-                                                ?: "Chat open nahi ho saki."
-                                        }
-                                }
+                        conversationRef.set(
+                            conversation,
+                            SetOptions.merge()
+                        )
+                            .addOnSuccessListener {
+                                selectedConversation = conversationId
+                                selectedUser = otherUser
                             }
-                            .addOnFailureListener {
-                                openingError = it.localizedMessage
+                            .addOnFailureListener { exception ->
+                                openingError = exception.localizedMessage
                                     ?: "Chat open nahi ho saki."
                             }
                     }
@@ -666,8 +665,10 @@ fun ConversationScreen(
                         ?: "Messages load nahi ho sake."
                 } else if (snapshot != null) {
                     messages = snapshot.documents.mapNotNull { document ->
-                        val sender = document.getString("senderId") ?: return@mapNotNull null
-                        val text = document.getString("text") ?: return@mapNotNull null
+                        val sender = document.getString("senderId")
+                            ?: return@mapNotNull null
+                        val text = document.getString("text")
+                            ?: return@mapNotNull null
                         val time = document.getLong("createdAt") ?: 0L
 
                         Message(
@@ -805,6 +806,7 @@ fun ConversationScreen(
                 enabled = message.isNotBlank() && !sending,
                 onClick = {
                     val textToSend = message.trim()
+
                     if (textToSend.isNotEmpty()) {
                         sending = true
                         error = ""
@@ -828,9 +830,15 @@ fun ConversationScreen(
                                             "lastMessageAt" to System.currentTimeMillis()
                                         )
                                     )
-                                    .addOnCompleteListener {
+                                    .addOnCompleteListener { updateTask ->
                                         sending = false
-                                        message = ""
+                                        if (updateTask.isSuccessful) {
+                                            message = ""
+                                        } else {
+                                            error = updateTask.exception?.localizedMessage
+                                                ?: "Message save ho gaya, lekin chat update nahi hui."
+                                            message = ""
+                                        }
                                     }
                             }
                             .addOnFailureListener {
