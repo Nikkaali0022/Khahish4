@@ -51,6 +51,13 @@ jobs:
 
           echo "Project found: $PROJECT_DIR"
 
+      - name: Copy updated MainActivity
+        run: |
+          TARGET="$PROJECT_DIR/app/src/main/java/com/khahish/app"
+          mkdir -p "$TARGET"
+          cp MainActivity.kt "$TARGET/MainActivity.kt"
+          echo "Updated MainActivity copied successfully"
+
       - name: Create Khahish App Icon
         run: |
           python3 -m pip install pillow
@@ -65,7 +72,7 @@ jobs:
           logo = Path("khahish_logo.png")
 
           if not logo.exists():
-              raise Exception("khahish_logo.png not found in repository root")
+              raise Exception("khahish_logo.png not found")
 
           image = Image.open(logo).convert("RGBA")
 
@@ -112,138 +119,88 @@ jobs:
                   tag = tag[:-1] + f' {attribute}="{value}">'
 
           content = content[:match.start()] + tag + content[match.end():]
-          manifest.write_text(content)
 
-          print("Khahish app icon configured successfully")
+          if "android.permission.INTERNET" not in content:
+              content = content.replace(
+                  '<application',
+                  '<uses-permission android:name="android.permission.INTERNET" />\n    <application',
+                  1
+              )
+
+          manifest.write_text(content)
+          print("Icon and Internet permission configured")
           PY
 
       - name: Place Firebase config
         run: |
           cp google-services.json "$PROJECT_DIR/app/google-services.json"
 
-      - name: Configure Firebase and Kotlin
+      - name: Configure Firebase Gradle
         run: |
           python3 - <<'PY'
           import os
-          import re
           from pathlib import Path
 
           project = Path(os.environ["PROJECT_DIR"])
           root = project / "build.gradle.kts"
           app = project / "app" / "build.gradle.kts"
 
-          s = root.read_text()
+          root_text = root.read_text()
+          app_text = app.read_text()
 
-          for plugin in [
-              "org.jetbrains.kotlin.android",
-              "org.jetbrains.kotlin.plugin.compose"
-          ]:
-              pattern = (
-                  r'(id\("' + re.escape(plugin) +
-                  r'"\) version ")[^"]+(" apply false)'
+          google_plugin = '    id("com.google.gms.google-services") version "4.4.2" apply false'
+
+          if "com.google.gms.google-services" not in root_text:
+              root_text = root_text.replace(
+                  '    id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false',
+                  '    id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false\n' + google_plugin
               )
 
-              s, count = re.subn(
-                  pattern,
-                  r'\g<1>2.4.21\g<2>',
-                  s
-              )
+          root.write_text(root_text)
 
-              if count != 1:
-                  raise Exception("Kotlin plugin not found: " + plugin)
-
-          if 'id("com.google.gms.google-services")' not in s:
-              anchor = (
-                  '    id("org.jetbrains.kotlin.plugin.compose") '
-                  'version "2.4.21" apply false'
-              )
-
-              if anchor not in s:
-                  raise Exception("Compose plugin line not found")
-
-              s = s.replace(
-                  anchor,
-                  anchor + '\n'
-                  '    id("com.google.gms.google-services") '
-                  'version "4.5.0" apply false'
-              )
-
-          root.write_text(s)
-
-          s = app.read_text()
-
-          if 'id("com.google.gms.google-services")' not in s:
-              anchor = '    id("org.jetbrains.kotlin.plugin.compose")'
-
-              if anchor not in s:
-                  raise Exception("App Compose plugin not found")
-
-              s = s.replace(
-                  anchor,
-                  anchor + '\n'
-                  '    id("com.google.gms.google-services")'
-              )
-
-          if "compileOptions {" not in s:
-              anchor = "    buildFeatures { compose = true }"
-
-              if anchor not in s:
-                  raise Exception("Build features block not found")
-
-              s = s.replace(
-                  anchor,
-                  '    compileOptions {\n'
-                  '        sourceCompatibility = JavaVersion.VERSION_17\n'
-                  '        targetCompatibility = JavaVersion.VERSION_17\n'
-                  '    }\n'
-                  + anchor
-              )
-          else:
-              s = re.sub(
-                  r'sourceCompatibility\s*=\s*JavaVersion\.VERSION_\w+',
-                  'sourceCompatibility = JavaVersion.VERSION_17',
-                  s
-              )
-
-              s = re.sub(
-                  r'targetCompatibility\s*=\s*JavaVersion\.VERSION_\w+',
-                  'targetCompatibility = JavaVersion.VERSION_17',
-                  s
-              )
-
-          if "compilerOptions {" not in s:
-              anchor = "dependencies {"
-
-              if anchor not in s:
-                  raise Exception("Dependencies block not found")
-
-              s = s.replace(
-                  anchor,
-                  'kotlin {\n'
-                  '    compilerOptions {\n'
-                  '        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget("17")\n'
-                  '    }\n'
-                  '}\n\n'
-                  + anchor,
+          if 'id("com.google.gms.google-services")' not in app_text:
+              app_text = app_text.replace(
+                  '    id("org.jetbrains.kotlin.plugin.compose")',
+                  '    id("org.jetbrains.kotlin.plugin.compose")\n    id("com.google.gms.google-services")',
                   1
               )
 
-          if "firebase-bom" not in s:
-              s = s.replace(
-                  "dependencies {\n",
-                  'dependencies {\n'
-                  '    implementation(platform("com.google.firebase:firebase-bom:35.1.0"))\n'
-                  '    implementation("com.google.firebase:firebase-auth")\n'
-                  '    implementation("com.google.firebase:firebase-firestore")\n',
+          if "compileOptions {" not in app_text:
+              app_text = app_text.replace(
+                  "    buildFeatures { compose = true }",
+                  """    compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+
+              buildFeatures { compose = true }"""
+              )
+
+          if "compilerOptions {" not in app_text:
+              app_text = app_text.replace(
+                  "dependencies {",
+                  """kotlin {
+              compilerOptions {
+                  jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget("17")
+              }
+          }
+
+          dependencies {""",
                   1
               )
 
-          app.write_text(s)
+          if "firebase-bom" not in app_text:
+              app_text = app_text.replace(
+                  "dependencies {",
+                  """dependencies {
+              implementation(platform("com.google.firebase:firebase-bom:35.1.0"))
+              implementation("com.google.firebase:firebase-auth")
+              implementation("com.google.firebase:firebase-firestore")""",
+                  1
+              )
 
-          print("Firebase configured")
-          print("Kotlin version: 2.4.21")
-          print("Java target: 17")
-          print("Kotlin JVM target: 17")
+          app.write_text(app_text)
+          print("Firebase Gradle configuration completed")
           PY
 
       - name: Build Khahish APK
