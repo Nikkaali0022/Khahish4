@@ -39,7 +39,13 @@ import com.google.firebase.firestore.SetOptions
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 private val Green = Color(0xFF18A889)
 private val Ink = Color(0xFF202A35)
 private val Pale = Color(0xFFF4F8F7)
@@ -437,7 +443,6 @@ fun MainHome(
                 photoUrl = document.getString("photoUrl") ?: ""
                 profileLoaded = true
 
-                // Profile load hone ke baad online status update
                 db.collection("users")
                     .document(uid)
                     .update("isOnline", true)
@@ -567,72 +572,122 @@ fun MainHome(
             }
         }
     ) { padding ->
+
+        var totalDrag by remember { mutableFloatStateOf(0f) }
+
         Box(
-            Modifier.fillMaxSize().padding(padding)
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .pointerInput(selectedTab) {
+                    detectHorizontalDragGestures(
+                        onHorizontalDrag = { change, dragAmount ->
+                            totalDrag += dragAmount
+                            change.consume()
+                        },
+                        onDragEnd = {
+                            if (totalDrag < -80f) {
+                                selectedTab = (selectedTab + 1).coerceAtMost(4)
+                            } else if (totalDrag > 80f) {
+                                selectedTab = (selectedTab - 1).coerceAtLeast(0)
+                            }
+
+                            totalDrag = 0f
+                        },
+                        onDragCancel = {
+                            totalDrag = 0f
+                        }
+                    )
+                }
         ) {
-            when (selectedTab) {
-                0 -> RecentChatsScreen(
-                    db = db,
-                    uid = uid,
-                    onChatClick = { chat ->
-                        selectedConversation = chat.id
-                        selectedUser = UserProfile(
-                            chat.otherUid,
-                            chat.otherName,
-                            ""
+            AnimatedContent(
+                targetState = selectedTab,
+                transitionSpec = {
+                    if (targetState > initialState) {
+                        slideInHorizontally(
+                            initialOffsetX = { it },
+                            animationSpec = tween(250)
+                        ) togetherWith slideOutHorizontally(
+                            targetOffsetX = { -it },
+                            animationSpec = tween(250)
+                        )
+                    } else {
+                        slideInHorizontally(
+                            initialOffsetX = { -it },
+                            animationSpec = tween(250)
+                        ) togetherWith slideOutHorizontally(
+                            targetOffsetX = { it },
+                            animationSpec = tween(250)
                         )
                     }
-                )
+                },
+                label = "KhahishTabAnimation"
+            ) { tab ->
 
-                1 -> UsernameSearchScreen(
-                    db = db,
-                    currentUid = uid,
-                    onUserClick = { otherUser ->
-                        openingError = ""
-
-                        val participants =
-                            listOf(uid, otherUser.uid).sorted()
-
-                        val conversationId =
-                            participants.joinToString("_")
-
-                        val conversationRef = db.collection("conversations")
-                            .document(conversationId)
-
-                        conversationRef.set(
-                            hashMapOf("participants" to participants),
-                            SetOptions.merge()
-                        ).addOnSuccessListener {
-                            selectedConversation = conversationId
-                            selectedUser = otherUser
-                        }.addOnFailureListener {
-                            openingError = it.localizedMessage
-                                ?: "Chat open nahi ho saki."
+                when (tab) {
+                    0 -> RecentChatsScreen(
+                        db = db,
+                        uid = uid,
+                        onChatClick = { chat ->
+                            selectedConversation = chat.id
+                            selectedUser = UserProfile(
+                                chat.otherUid,
+                                chat.otherName,
+                                ""
+                            )
                         }
-                    }
-                )
+                    )
 
-                2 -> FeaturePlaceholder(
-                    title = "Updates",
-                    description = "Status aur stories ka feature aglay update mein aayega.",
-                    icon = Icons.Default.Refresh
-                )
+                    1 -> UsernameSearchScreen(
+                        db = db,
+                        currentUid = uid,
+                        onUserClick = { otherUser ->
+                            openingError = ""
 
-                3 -> FeaturePlaceholder(
-                    title = "Calls",
-                    description = "Voice aur video calling ka feature abhi tayyar nahi hai.",
-                    icon = Icons.Default.Call
-                )
+                            val participants =
+                                listOf(uid, otherUser.uid).sorted()
 
-                4 -> SettingsPage(
-                    name = userName,
-                    username = username,
-                    email = email,
-                    bio = bio,
-                    photoUrl = photoUrl,
-                    onEditProfile = { editingProfile = true },
-                    onLogout = { auth.signOut() }
-                )
+                            val conversationId =
+                                participants.joinToString("_")
+
+                            val conversationRef = db.collection("conversations")
+                                .document(conversationId)
+
+                            conversationRef.set(
+                                hashMapOf("participants" to participants),
+                                SetOptions.merge()
+                            ).addOnSuccessListener {
+                                selectedConversation = conversationId
+                                selectedUser = otherUser
+                            }.addOnFailureListener {
+                                openingError = it.localizedMessage
+                                    ?: "Chat open nahi ho saki."
+                            }
+                        }
+                    )
+
+                    2 -> FeaturePlaceholder(
+                        title = "Updates",
+                        description = "Status aur stories ka feature aglay update mein aayega.",
+                        icon = Icons.Default.Refresh
+                    )
+
+                    3 -> FeaturePlaceholder(
+                        title = "Calls",
+                        description = "Voice aur video calling ka feature abhi tayyar nahi hai.",
+                        icon = Icons.Default.Call
+                    )
+
+                    4 -> SettingsPage(
+                        name = userName,
+                        username = username,
+                        email = email,
+                        bio = bio,
+                        photoUrl = photoUrl,
+                        onEditProfile = { editingProfile = true },
+                        onLogout = { auth.signOut() }
+                    )
+                }
             }
 
             if (openingError.isNotBlank()) {
@@ -647,7 +702,6 @@ fun MainHome(
         }
     }
 }
-
 @Composable
 fun EditProfileScreen(
     uid: String,
