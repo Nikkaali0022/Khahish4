@@ -51,6 +51,72 @@ jobs:
 
           echo "Project found: $PROJECT_DIR"
 
+      - name: Create Khahish App Icon
+        run: |
+          python3 -m pip install pillow
+
+          python3 - <<'PY'
+          from PIL import Image, ImageOps
+          from pathlib import Path
+          import os
+          import re
+
+          project = Path(os.environ["PROJECT_DIR"])
+          logo = Path("khahish_logo.png")
+
+          if not logo.exists():
+              raise Exception("khahish_logo.png not found in repository root")
+
+          image = Image.open(logo).convert("RGBA")
+
+          sizes = {
+              "mipmap-mdpi": 48,
+              "mipmap-hdpi": 72,
+              "mipmap-xhdpi": 96,
+              "mipmap-xxhdpi": 144,
+              "mipmap-xxxhdpi": 192
+          }
+
+          for folder, size in sizes.items():
+              output = project / "app/src/main/res" / folder
+              output.mkdir(parents=True, exist_ok=True)
+
+              icon = ImageOps.fit(
+                  image,
+                  (size, size),
+                  method=Image.Resampling.LANCZOS
+              )
+
+              icon.save(output / "khahish_launcher.png")
+              icon.save(output / "khahish_launcher_round.png")
+
+          manifest = project / "app/src/main/AndroidManifest.xml"
+          content = manifest.read_text()
+
+          match = re.search(r'<application\b[^>]*>', content)
+
+          if not match:
+              raise Exception("Application tag not found")
+
+          tag = match.group(0)
+
+          for attribute, value in [
+              ("android:icon", "@mipmap/khahish_launcher"),
+              ("android:roundIcon", "@mipmap/khahish_launcher_round")
+          ]:
+              pattern = rf'{attribute}="[^"]*"'
+
+              if re.search(pattern, tag):
+                  tag = re.sub(pattern, f'{attribute}="{value}"', tag)
+              else:
+                  tag = tag[:-1] + f' {attribute}="{value}">'
+
+          content = content[:match.start()] + tag + content[match.end():]
+          manifest.write_text(content)
+
+          print("Khahish app icon configured successfully")
+          PY
+
       - name: Place Firebase config
         run: |
           cp google-services.json "$PROJECT_DIR/app/google-services.json"
@@ -66,7 +132,6 @@ jobs:
           root = project / "build.gradle.kts"
           app = project / "app" / "build.gradle.kts"
 
-          # Update Kotlin plugin versions
           s = root.read_text()
 
           for plugin in [
@@ -77,22 +142,25 @@ jobs:
                   r'(id\("' + re.escape(plugin) +
                   r'"\) version ")[^"]+(" apply false)'
               )
+
               s, count = re.subn(
                   pattern,
                   r'\g<1>2.4.21\g<2>',
                   s
               )
+
               if count != 1:
                   raise Exception("Kotlin plugin not found: " + plugin)
 
-          # Add Google Services plugin
           if 'id("com.google.gms.google-services")' not in s:
               anchor = (
                   '    id("org.jetbrains.kotlin.plugin.compose") '
                   'version "2.4.21" apply false'
               )
+
               if anchor not in s:
                   raise Exception("Compose plugin line not found")
+
               s = s.replace(
                   anchor,
                   anchor + '\n'
@@ -102,25 +170,26 @@ jobs:
 
           root.write_text(s)
 
-          # Configure app module
           s = app.read_text()
 
-          # Apply Google Services plugin
           if 'id("com.google.gms.google-services")' not in s:
               anchor = '    id("org.jetbrains.kotlin.plugin.compose")'
+
               if anchor not in s:
                   raise Exception("App Compose plugin not found")
+
               s = s.replace(
                   anchor,
                   anchor + '\n'
                   '    id("com.google.gms.google-services")'
               )
 
-          # Set Java target to 17
           if "compileOptions {" not in s:
               anchor = "    buildFeatures { compose = true }"
+
               if anchor not in s:
                   raise Exception("Build features block not found")
+
               s = s.replace(
                   anchor,
                   '    compileOptions {\n'
@@ -135,17 +204,19 @@ jobs:
                   'sourceCompatibility = JavaVersion.VERSION_17',
                   s
               )
+
               s = re.sub(
                   r'targetCompatibility\s*=\s*JavaVersion\.VERSION_\w+',
                   'targetCompatibility = JavaVersion.VERSION_17',
                   s
               )
 
-          # Set Kotlin JVM target to 17
           if "compilerOptions {" not in s:
               anchor = "dependencies {"
+
               if anchor not in s:
                   raise Exception("Dependencies block not found")
+
               s = s.replace(
                   anchor,
                   'kotlin {\n'
@@ -157,7 +228,6 @@ jobs:
                   1
               )
 
-          # Add Firebase dependencies
           if "firebase-bom" not in s:
               s = s.replace(
                   "dependencies {\n",
