@@ -135,10 +135,11 @@ jobs:
         run: |
           cp google-services.json "$PROJECT_DIR/app/google-services.json"
 
-      - name: Configure Firebase Gradle
+      - name: Configure Firebase and Kotlin
         run: |
           python3 - <<'PY'
           import os
+          import re
           from pathlib import Path
 
           project = Path(os.environ["PROJECT_DIR"])
@@ -148,23 +149,49 @@ jobs:
           root_text = root.read_text()
           app_text = app.read_text()
 
-          google_plugin = '    id("com.google.gms.google-services") version "4.4.2" apply false'
+          # Update both Kotlin plugins to 2.2.21
+          for plugin in [
+              "org.jetbrains.kotlin.android",
+              "org.jetbrains.kotlin.plugin.compose"
+          ]:
+              pattern = (
+                  r'(id\("' + re.escape(plugin) +
+                  r'"\)\s+version\s+")[^"]+(" apply false)'
+              )
 
+              root_text, count = re.subn(
+                  pattern,
+                  r'\g<1>2.2.21\g<2>',
+                  root_text
+              )
+
+              if count != 1:
+                  raise Exception("Could not update Kotlin plugin: " + plugin)
+
+          # Add Google Services plugin to root Gradle
           if "com.google.gms.google-services" not in root_text:
               root_text = root_text.replace(
-                  '    id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false',
-                  '    id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false\n' + google_plugin
+                  '    id("org.jetbrains.kotlin.plugin.compose") version "2.2.21" apply false',
+                  '    id("org.jetbrains.kotlin.plugin.compose") version "2.2.21" apply false\n'
+                  '    id("com.google.gms.google-services") version "4.4.2" apply false'
               )
 
           root.write_text(root_text)
 
+          # Apply Google Services plugin in app
           if 'id("com.google.gms.google-services")' not in app_text:
+              anchor = '    id("org.jetbrains.kotlin.plugin.compose")'
+
+              if anchor not in app_text:
+                  raise Exception("Compose plugin not found in app Gradle")
+
               app_text = app_text.replace(
-                  '    id("org.jetbrains.kotlin.plugin.compose")',
-                  '    id("org.jetbrains.kotlin.plugin.compose")\n    id("com.google.gms.google-services")',
+                  anchor,
+                  anchor + '\n    id("com.google.gms.google-services")',
                   1
               )
 
+          # Java 17 compatibility
           if "compileOptions {" not in app_text:
               app_text = app_text.replace(
                   "    buildFeatures { compose = true }",
@@ -176,6 +203,7 @@ jobs:
               buildFeatures { compose = true }"""
               )
 
+          # Kotlin JVM target 17
           if "compilerOptions {" not in app_text:
               app_text = app_text.replace(
                   "dependencies {",
@@ -189,6 +217,7 @@ jobs:
                   1
               )
 
+          # Firebase dependencies
           if "firebase-bom" not in app_text:
               app_text = app_text.replace(
                   "dependencies {",
@@ -200,7 +229,10 @@ jobs:
               )
 
           app.write_text(app_text)
-          print("Firebase Gradle configuration completed")
+
+          print("Kotlin 2.2.21 configured")
+          print("Firebase Auth and Firestore configured")
+          print("Google Services plugin configured")
           PY
 
       - name: Build Khahish APK
