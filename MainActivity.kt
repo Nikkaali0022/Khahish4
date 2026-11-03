@@ -19,12 +19,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -226,6 +229,8 @@ fun AuthScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
                                     "uid" to user.uid,
                                     "name" to name.trim(),
                                     "email" to email.trim(),
+                                    "bio" to "",
+                                    "photoUrl" to "",
                                     "createdAt" to System.currentTimeMillis()
                                 )
 
@@ -301,11 +306,14 @@ fun MainHome(
 ) {
     var userName by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }
+    var bio by remember { mutableStateOf("") }
+    var photoUrl by remember { mutableStateOf("") }
     var selectedTab by remember { mutableIntStateOf(0) }
     var selectedUser by remember { mutableStateOf<UserProfile?>(null) }
     var selectedConversation by remember { mutableStateOf("") }
     var openingError by remember { mutableStateOf("") }
     var profileLoaded by remember { mutableStateOf(false) }
+    var editingProfile by remember { mutableStateOf(false) }
 
     LaunchedEffect(uid) {
         profileLoaded = false
@@ -313,6 +321,8 @@ fun MainHome(
             .addOnSuccessListener { document ->
                 userName = document.getString("name") ?: "Khahish User"
                 username = document.getString("username") ?: ""
+                bio = document.getString("bio") ?: ""
+                photoUrl = document.getString("photoUrl") ?: ""
                 profileLoaded = true
             }
             .addOnFailureListener {
@@ -321,10 +331,14 @@ fun MainHome(
             }
     }
 
-    BackHandler(enabled = selectedUser != null) {
-        selectedUser = null
-        selectedConversation = ""
-        openingError = ""
+    BackHandler(enabled = selectedUser != null || editingProfile) {
+        if (editingProfile) {
+            editingProfile = false
+        } else {
+            selectedUser = null
+            selectedConversation = ""
+            openingError = ""
+        }
     }
 
     if (!profileLoaded) {
@@ -340,6 +354,24 @@ fun MainHome(
             name = userName,
             db = db,
             onComplete = { username = it }
+        )
+        return
+    }
+
+    if (editingProfile) {
+        EditProfileScreen(
+            uid = uid,
+            db = db,
+            currentName = userName,
+            currentBio = bio,
+            currentPhotoUrl = photoUrl,
+            onBack = { editingProfile = false },
+            onSaved = { newName, newBio, newPhotoUrl ->
+                userName = newName
+                bio = newBio
+                photoUrl = newPhotoUrl
+                editingProfile = false
+            }
         )
         return
     }
@@ -459,6 +491,9 @@ fun MainHome(
                     name = userName,
                     username = username,
                     email = email,
+                    bio = bio,
+                    photoUrl = photoUrl,
+                    onEditProfile = { editingProfile = true },
                     onLogout = { auth.signOut() }
                 )
             }
@@ -470,6 +505,163 @@ fun MainHome(
                     modifier = Modifier.align(Alignment.BottomCenter)
                         .padding(12.dp)
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun EditProfileScreen(
+    uid: String,
+    db: FirebaseFirestore,
+    currentName: String,
+    currentBio: String,
+    currentPhotoUrl: String,
+    onBack: () -> Unit,
+    onSaved: (String, String, String) -> Unit
+) {
+    var name by remember(currentName) { mutableStateOf(currentName) }
+    var bio by remember(currentBio) { mutableStateOf(currentBio) }
+    var photoUrl by remember(currentPhotoUrl) {
+        mutableStateOf(currentPhotoUrl)
+    }
+    var error by remember { mutableStateOf("") }
+    var saving by remember { mutableStateOf(false) }
+
+    Column(
+        Modifier.fillMaxSize().background(Pale).padding(18.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+            }
+            Text(
+                "Edit Profile",
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = Ink
+            )
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        Box(
+            Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center
+        ) {
+            UserAvatar(name, photoUrl, size = 104)
+        }
+
+        Spacer(Modifier.height(22.dp))
+
+        OutlinedTextField(
+            value = name,
+            onValueChange = { name = it },
+            label = { Text("Full Name") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+
+        Spacer(Modifier.height(14.dp))
+
+        OutlinedTextField(
+            value = bio,
+            onValueChange = { bio = it },
+            label = { Text("Bio") },
+            placeholder = { Text("Apne baare mein kuch likhein") },
+            modifier = Modifier.fillMaxWidth(),
+            minLines = 3,
+            maxLines = 4
+        )
+
+        Spacer(Modifier.height(14.dp))
+
+        OutlinedTextField(
+            value = photoUrl,
+            onValueChange = {
+                photoUrl = it.trim()
+                error = ""
+            },
+            label = { Text("Profile Picture URL") },
+            placeholder = { Text("https://example.com/photo.jpg") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Uri
+            )
+        )
+
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Tasveer ka direct image URL yahan paste karein.",
+            color = Muted,
+            fontSize = 12.sp
+        )
+
+        if (error.isNotBlank()) {
+            Spacer(Modifier.height(12.dp))
+            Text(error, color = Color.Red)
+        }
+
+        Spacer(Modifier.height(22.dp))
+
+        Button(
+            onClick = {
+                val cleanName = name.trim()
+                val cleanBio = bio.trim()
+                val cleanPhoto = photoUrl.trim()
+
+                if (cleanName.isBlank()) {
+                    error = "Naam khaali nahi ho sakta."
+                    return@Button
+                }
+
+                if (cleanPhoto.isNotBlank() &&
+                    !cleanPhoto.startsWith("https://") &&
+                    !cleanPhoto.startsWith("http://")
+                ) {
+                    error = "Profile picture ka valid URL enter karein."
+                    return@Button
+                }
+
+                saving = true
+                error = ""
+
+                val updates = mapOf(
+                    "name" to cleanName,
+                    "bio" to cleanBio,
+                    "photoUrl" to cleanPhoto
+                )
+
+                db.collection("users").document(uid)
+                    .set(updates, SetOptions.merge())
+                    .addOnSuccessListener {
+                        saving = false
+                        onSaved(cleanName, cleanBio, cleanPhoto)
+                    }
+                    .addOnFailureListener {
+                        saving = false
+                        error = it.localizedMessage
+                            ?: "Profile save nahi ho saki."
+                    }
+            },
+            enabled = !saving,
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Green
+            ),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            if (saving) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(22.dp),
+                    color = Color.White,
+                    strokeWidth = 2.dp
+                )
+            } else {
+                Icon(Icons.Default.Save, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Save Profile")
             }
         }
     }
@@ -892,8 +1084,6 @@ fun ConversationScreen(
                     messages = loadedMessages
                     error = ""
 
-                    // Incoming messages: mark delivered, then read.
-                    // Old messages without receipt fields are left unchanged.
                     loadedMessages.forEach { item ->
                         if (item.senderId != currentUid) {
                             val original = snapshot.documents
@@ -1101,19 +1291,35 @@ fun ConversationScreen(
 }
 
 @Composable
-fun UserAvatar(name: String) {
-    Box(
-        Modifier.size(48.dp).background(
-            Green.copy(alpha = 0.14f), CircleShape
-        ),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            name.take(1).uppercase().ifBlank { "K" },
-            color = Green,
-            fontWeight = FontWeight.Bold,
-            fontSize = 19.sp
+fun UserAvatar(
+    name: String,
+    photoUrl: String = "",
+    size: Int = 48
+) {
+    if (photoUrl.isNotBlank()) {
+        AsyncImage(
+            model = photoUrl,
+            contentDescription = "Profile picture",
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(size.dp)
+                .clip(CircleShape)
+                .background(Green.copy(alpha = 0.14f))
         )
+    } else {
+        Box(
+            Modifier.size(size.dp).background(
+                Green.copy(alpha = 0.14f), CircleShape
+            ),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                name.take(1).uppercase().ifBlank { "K" },
+                color = Green,
+                fontWeight = FontWeight.Bold,
+                fontSize = (size / 2.5).sp
+            )
+        }
     }
 }
 
@@ -1129,6 +1335,9 @@ fun SettingsPage(
     name: String,
     username: String,
     email: String,
+    bio: String,
+    photoUrl: String,
+    onEditProfile: () -> Unit,
     onLogout: () -> Unit
 ) {
     Column(Modifier.fillMaxSize().padding(18.dp)) {
@@ -1143,18 +1352,41 @@ fun SettingsPage(
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            UserAvatar(name)
+            UserAvatar(name, photoUrl, 64)
             Spacer(Modifier.width(14.dp))
 
-            Column {
+            Column(Modifier.weight(1f)) {
                 Text(name.ifBlank { "Khahish User" },
                     fontWeight = FontWeight.Bold, color = Ink)
                 Text("@$username", color = Muted, fontSize = 12.sp)
                 Text(email, color = Muted, fontSize = 12.sp)
+                if (bio.isNotBlank()) {
+                    Spacer(Modifier.height(5.dp))
+                    Text(bio, color = Ink, fontSize = 13.sp)
+                }
             }
         }
 
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(12.dp))
+
+        Row(
+            Modifier.fillMaxWidth()
+                .clickable { onEditProfile() }
+                .background(Color.White, RoundedCornerShape(12.dp))
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Default.Edit,
+                contentDescription = null, tint = Green)
+            Spacer(Modifier.width(12.dp))
+            Text("Edit Profile", color = Ink,
+                fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.weight(1f))
+            Icon(Icons.Default.ChevronRight,
+                contentDescription = null, tint = Muted)
+        }
+
+        Spacer(Modifier.height(12.dp))
 
         Row(
             Modifier.fillMaxWidth().clickable { onLogout() }
