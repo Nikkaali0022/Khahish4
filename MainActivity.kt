@@ -1,7 +1,9 @@
+
 package com.khahish.app
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -13,7 +15,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,7 +29,6 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
-import com.google.firebase.firestore.SetOptions
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -47,7 +47,8 @@ class MainActivity : ComponentActivity() {
 
 data class UserProfile(
     val uid: String,
-    val name: String
+    val name: String,
+    val username: String
 )
 
 data class Message(
@@ -55,6 +56,14 @@ data class Message(
     val senderId: String,
     val text: String,
     val createdAt: Long
+)
+
+data class RecentChat(
+    val id: String,
+    val otherUid: String,
+    val otherName: String,
+    val lastMessage: String,
+    val lastMessageAt: Long
 )
 
 @Composable
@@ -135,8 +144,7 @@ fun AuthScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
 
         Text(
             if (isSignup) "Create your account" else "Welcome back",
-            color = Muted,
-            fontSize = 15.sp
+            color = Muted
         )
 
         Spacer(Modifier.height(28.dp))
@@ -188,7 +196,7 @@ fun AuthScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
 
         if (error.isNotBlank()) {
             Spacer(Modifier.height(12.dp))
-            Text(error, color = Color.Red, fontSize = 13.sp)
+            Text(error, color = Color.Red)
         }
 
         Spacer(Modifier.height(20.dp))
@@ -212,7 +220,7 @@ fun AuthScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
                         return@Button
                     }
                     if (password != confirmPassword) {
-                        error = "Dono passwords match nahi karte."
+                        error = "Passwords match nahi karte."
                         return@Button
                     }
                 }
@@ -239,28 +247,11 @@ fun AuthScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
                                     .document(user.uid)
                                     .set(profile)
                                     .addOnCompleteListener { saveTask ->
+                                        loading = false
                                         if (!saveTask.isSuccessful) {
-                                            loading = false
-                                            error = "Profile save nahi hui: ${
-                                                saveTask.exception?.localizedMessage
-                                            }"
-                                        } else {
-                                            val publicProfile = hashMapOf(
-                                                "uid" to user.uid,
-                                                "name" to name.trim()
-                                            )
-
-                                            db.collection("publicProfiles")
-                                                .document(user.uid)
-                                                .set(publicProfile)
-                                                .addOnCompleteListener { publicTask ->
-                                                    loading = false
-                                                    if (!publicTask.isSuccessful) {
-                                                        error = "Public profile save nahi hui: ${
-                                                            publicTask.exception?.localizedMessage
-                                                        }"
-                                                    }
-                                                }
+                                            error = saveTask.exception
+                                                ?.localizedMessage
+                                                ?: "Profile save nahi hui."
                                         }
                                     }
                             } else {
@@ -289,7 +280,9 @@ fun AuthScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
                 .fillMaxWidth()
                 .height(52.dp),
             enabled = !loading,
-            colors = ButtonDefaults.buttonColors(containerColor = Green),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Green
+            ),
             shape = RoundedCornerShape(12.dp)
         ) {
             if (loading) {
@@ -300,8 +293,7 @@ fun AuthScreen(auth: FirebaseAuth, db: FirebaseFirestore) {
                 )
             } else {
                 Text(
-                    if (isSignup) "Create Account" else "Login",
-                    fontSize = 16.sp
+                    if (isSignup) "Create Account" else "Login"
                 )
             }
         }
@@ -329,36 +321,52 @@ fun MainHome(
     email: String
 ) {
     var userName by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf("") }
     var selectedTab by remember { mutableIntStateOf(0) }
     var selectedUser by remember { mutableStateOf<UserProfile?>(null) }
     var selectedConversation by remember { mutableStateOf("") }
     var openingError by remember { mutableStateOf("") }
+    var profileLoaded by remember { mutableStateOf(false) }
 
     LaunchedEffect(uid) {
-        db.collection("users")
-            .document(uid)
-            .get()
+        db.collection("users").document(uid).get()
             .addOnSuccessListener { document ->
-                val name = document.getString("name") ?: "Khahish User"
-                userName = name
-
-                val profile = hashMapOf(
-                    "uid" to uid,
-                    "name" to name
-                )
-
-                db.collection("publicProfiles")
-                    .document(uid)
-                    .set(profile)
-                    .addOnFailureListener {
-                        openingError = it.localizedMessage
-                            ?: "Public profile update nahi ho saki."
-                    }
+                userName = document.getString("name") ?: "Khahish User"
+                profileLoaded = true
             }
             .addOnFailureListener {
                 openingError = it.localizedMessage
-                    ?: "User profile load nahi ho saki."
+                    ?: "Profile load nahi hui."
+                profileLoaded = true
             }
+    }
+
+    BackHandler(enabled = selectedUser != null) {
+        selectedUser = null
+        selectedConversation = ""
+        openingError = ""
+    }
+
+    if (!profileLoaded) {
+        Box(
+            Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator(color = Green)
+        }
+        return
+    }
+
+    if (username.isBlank()) {
+        UsernameSetupScreen(
+            uid = uid,
+            name = userName,
+            db = db,
+            onComplete = { value ->
+                username = value
+            }
+        )
+        return
     }
 
     if (selectedUser != null) {
@@ -375,13 +383,13 @@ fun MainHome(
         return
     }
 
-    val tabs = listOf("Chats", "Updates", "Calls", "Settings")
+    val tabs = listOf("Chats", "Search", "Settings")
 
     Scaffold(
         containerColor = Pale,
         topBar = {
             Column(
-                modifier = Modifier
+                Modifier
                     .fillMaxWidth()
                     .background(Color.White)
                     .padding(horizontal = 18.dp, vertical = 14.dp)
@@ -393,7 +401,7 @@ fun MainHome(
                     color = Green
                 )
                 Text(
-                    if (userName.isNotBlank()) "Welcome, $userName" else email,
+                    "Welcome, $userName  •  @$username",
                     color = Muted,
                     fontSize = 12.sp
                 )
@@ -402,10 +410,9 @@ fun MainHome(
         bottomBar = {
             NavigationBar(containerColor = Color.White) {
                 val icons = listOf(
-                    Icons.Outlined.ChatBubbleOutline,
-                    Icons.Outlined.Circle,
-                    Icons.Outlined.Call,
-                    Icons.Outlined.Settings
+                    Icons.Default.Chat,
+                    Icons.Default.Search,
+                    Icons.Default.Settings
                 )
 
                 tabs.forEachIndexed { index, label ->
@@ -427,58 +434,62 @@ fun MainHome(
         }
     ) { padding ->
         Box(
-            modifier = Modifier
+            Modifier
                 .fillMaxSize()
                 .padding(padding)
         ) {
             when (selectedTab) {
-                0 -> UsersScreen(
+                0 -> RecentChatsScreen(
+                    db = db,
+                    uid = uid,
+                    onChatClick = { chat ->
+                        selectedConversation = chat.id
+                        selectedUser = UserProfile(
+                            chat.otherUid,
+                            chat.otherName,
+                            ""
+                        )
+                    }
+                )
+
+                1 -> UsernameSearchScreen(
                     db = db,
                     currentUid = uid,
                     onUserClick = { otherUser ->
                         openingError = ""
 
-                        val participants = listOf(uid, otherUser.uid).sorted()
+                        val participants = listOf(
+                            uid,
+                            otherUser.uid
+                        ).sorted()
 
-                        val conversationId = participants.joinToString("_")
+                        val conversationId =
+                            participants.joinToString("_")
 
                         val conversationRef = db.collection("conversations")
                             .document(conversationId)
 
-                        // Direct merge: pehle get() nahi karte,
-                        // is liye missing conversation par read permission error nahi aata.
-                        // Sirf participants field set hoti hai; purane messages/lastMessage safe rehte hain.
                         val conversation = hashMapOf(
-                            "participants" to participants
+                            "participants" to participants,
+                            "createdAt" to System.currentTimeMillis()
                         )
 
                         conversationRef.set(
                             conversation,
-                            SetOptions.merge()
-                        )
-                            .addOnSuccessListener {
-                                selectedConversation = conversationId
-                                selectedUser = otherUser
-                            }
-                            .addOnFailureListener { exception ->
-                                openingError = exception.localizedMessage
-                                    ?: "Chat open nahi ho saki."
-                            }
+                            com.google.firebase.firestore.SetOptions.merge()
+                        ).addOnSuccessListener {
+                            selectedConversation = conversationId
+                            selectedUser = otherUser
+                        }.addOnFailureListener {
+                            openingError = it.localizedMessage
+                                ?: "Chat open nahi ho saki."
+                        }
                     }
                 )
 
-                1 -> PlaceholderPage(
-                    "Updates",
-                    "Your updates will appear here."
-                )
-
-                2 -> PlaceholderPage(
-                    "Calls",
-                    "Your calls will appear here."
-                )
-
-                3 -> SettingsPage(
+                2 -> SettingsPage(
                     name = userName,
+                    username = username,
                     email = email,
                     onLogout = { auth.signOut() }
                 )
@@ -498,34 +509,343 @@ fun MainHome(
 }
 
 @Composable
-fun UsersScreen(
+fun UsernameSetupScreen(
+    uid: String,
+    name: String,
+    db: FirebaseFirestore,
+    onComplete: (String) -> Unit
+) {
+    var input by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(false) }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Pale)
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            "Choose your username",
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold,
+            color = Ink
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        Text(
+            "Doosre log aapko isi username se search karenge.",
+            color = Muted
+        )
+
+        Spacer(Modifier.height(20.dp))
+
+        OutlinedTextField(
+            value = input,
+            onValueChange = {
+                input = it.lowercase().replace(" ", "")
+                error = ""
+            },
+            label = { Text("Username") },
+            leadingIcon = { Text("@") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        Text(
+            "3–20 characters. Letters, numbers aur underscore.",
+            color = Muted,
+            fontSize = 12.sp
+        )
+
+        if (error.isNotBlank()) {
+            Spacer(Modifier.height(10.dp))
+            Text(error, color = Color.Red)
+        }
+
+        Spacer(Modifier.height(18.dp))
+
+        Button(
+            onClick = {
+                val value = input.trim().removePrefix("@").lowercase()
+
+                if (!value.matches(Regex("^[a-z0-9_]{3,20}$"))) {
+                    error = "Username 3–20 characters ka hona chahiye."
+                    return@Button
+                }
+
+                loading = true
+                error = ""
+
+                val usernameRef = db.collection("usernames")
+                    .document(value)
+
+                val mappingRef = db.collection("usernamesByUid")
+                    .document(uid)
+
+                db.runTransaction { transaction ->
+                    val existing = transaction.get(usernameRef)
+
+                    if (existing.exists()) {
+                        throw IllegalStateException(
+                            "Ye username pehle se use ho raha hai."
+                        )
+                    }
+
+                    val data = hashMapOf(
+                        "uid" to uid,
+                        "name" to name,
+                        "username" to value
+                    )
+
+                    transaction.set(usernameRef, data)
+                    transaction.set(mappingRef, data)
+
+                    transaction.set(
+                        db.collection("users").document(uid),
+                        mapOf("username" to value),
+                        com.google.firebase.firestore.SetOptions.merge()
+                    )
+
+                    null
+                }.addOnSuccessListener {
+                    loading = false
+                    onComplete(value)
+                }.addOnFailureListener {
+                    loading = false
+                    error = it.localizedMessage
+                        ?: "Username save nahi ho saka."
+                }
+            },
+            enabled = !loading,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Green
+            )
+        ) {
+            if (loading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(22.dp),
+                    color = Color.White
+                )
+            } else {
+                Text("Save Username")
+            }
+        }
+    }
+}
+
+@Composable
+fun UsernameSearchScreen(
     db: FirebaseFirestore,
     currentUid: String,
     onUserClick: (UserProfile) -> Unit
 ) {
-    var users by remember { mutableStateOf<List<UserProfile>>(emptyList()) }
     var search by remember { mutableStateOf("") }
+    var result by remember { mutableStateOf<UserProfile?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    var searched by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        Text(
+            "Find people",
+            fontSize = 21.sp,
+            fontWeight = FontWeight.Bold,
+            color = Ink
+        )
+
+        Spacer(Modifier.height(14.dp))
+
+        OutlinedTextField(
+            value = search,
+            onValueChange = {
+                search = it
+                result = null
+                searched = false
+                error = ""
+            },
+            placeholder = { Text("Enter exact username") },
+            leadingIcon = {
+                Icon(Icons.Default.Search, contentDescription = null)
+            },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+
+        Spacer(Modifier.height(10.dp))
+
+        Button(
+            onClick = {
+                val value = search.trim()
+                    .removePrefix("@")
+                    .lowercase()
+
+                if (!value.matches(Regex("^[a-z0-9_]{3,20}$"))) {
+                    error = "Valid username enter karein."
+                    return@Button
+                }
+
+                loading = true
+                searched = false
+                result = null
+                error = ""
+
+                db.collection("usernames")
+                    .document(value)
+                    .get()
+                    .addOnSuccessListener { document ->
+                        loading = false
+                        searched = true
+
+                        if (document.exists()) {
+                            val id = document.getString("uid") ?: ""
+                            val name = document.getString("name")
+                                ?: "Khahish User"
+
+                            if (id == currentUid) {
+                                error = "Ye aapka apna username hai."
+                            } else {
+                                result = UserProfile(id, name, value)
+                            }
+                        }
+                    }
+                    .addOnFailureListener {
+                        loading = false
+                        error = it.localizedMessage
+                            ?: "Search nahi ho saki."
+                    }
+            },
+            enabled = !loading,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Green
+            )
+        ) {
+            if (loading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    color = Color.White
+                )
+            } else {
+                Text("Search")
+            }
+        }
+
+        if (error.isNotBlank()) {
+            Spacer(Modifier.height(10.dp))
+            Text(error, color = Color.Red)
+        }
+
+        if (searched && result == null && error.isBlank()) {
+            Spacer(Modifier.height(18.dp))
+            Text("Is username ka user nahi mila.", color = Muted)
+        }
+
+        result?.let { user ->
+            Spacer(Modifier.height(18.dp))
+
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(Color.White, RoundedCornerShape(14.dp))
+                    .clickable { onUserClick(user) }
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                UserAvatar(user.name)
+
+                Spacer(Modifier.width(12.dp))
+
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        user.name,
+                        fontWeight = FontWeight.Bold,
+                        color = Ink
+                    )
+                    Text("@${user.username}", color = Muted)
+                }
+
+                Icon(
+                    Icons.Default.Chat,
+                    contentDescription = "Open chat",
+                    tint = Green
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun RecentChatsScreen(
+    db: FirebaseFirestore,
+    uid: String,
+    onChatClick: (RecentChat) -> Unit
+) {
+    var chats by remember { mutableStateOf<List<RecentChat>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf("") }
 
-    DisposableEffect(currentUid) {
+    DisposableEffect(uid) {
         val registration: ListenerRegistration =
-            db.collection("publicProfiles")
+            db.collection("conversations")
+                .whereArrayContains("participants", uid)
                 .addSnapshotListener { snapshot, exception ->
                     if (exception != null) {
                         loading = false
                         error = exception.localizedMessage
-                            ?: "Users load nahi ho sake."
+                            ?: "Chats load nahi ho sakin."
                     } else if (snapshot != null) {
-                        users = snapshot.documents.mapNotNull { document ->
-                            val id = document.getString("uid") ?: document.id
-                            val name = document.getString("name") ?: "Khahish User"
-
-                            if (id == currentUid) null
-                            else UserProfile(id, name)
-                        }
                         loading = false
                         error = ""
+
+                        snapshot.documents.forEach { document ->
+                            val participants =
+                                document.get("participants") as? List<*>
+                                    ?: emptyList<Any>()
+
+                            val otherUid = participants
+                                .filterIsInstance<String>()
+                                .firstOrNull { it != uid }
+                                ?: return@forEach
+
+                            db.collection("usernamesByUid")
+                                .document(otherUid)
+                                .get()
+                                .addOnSuccessListener { profile ->
+                                    val name = profile.getString("name")
+                                        ?: "Khahish User"
+
+                                    val chat = RecentChat(
+                                        id = document.id,
+                                        otherUid = otherUid,
+                                        otherName = name,
+                                        lastMessage = document.getString(
+                                            "lastMessage"
+                                        ) ?: "Start chatting",
+                                        lastMessageAt = document.getLong(
+                                            "lastMessageAt"
+                                        ) ?: document.getLong("createdAt") ?: 0L
+                                    )
+
+                                    chats = (chats.filterNot {
+                                        it.id == chat.id
+                                    } + chat).sortedByDescending {
+                                        it.lastMessageAt
+                                    }
+                                }
+                        }
                     }
                 }
 
@@ -533,36 +853,22 @@ fun UsersScreen(
     }
 
     Column(
-        modifier = Modifier
+        Modifier
             .fillMaxSize()
             .padding(14.dp)
     ) {
         Text(
-            "People on Khahish",
-            fontSize = 19.sp,
+            "Recent Chats",
+            fontSize = 20.sp,
             fontWeight = FontWeight.Bold,
             color = Ink
         )
 
         Spacer(Modifier.height(12.dp))
 
-        OutlinedTextField(
-            value = search,
-            onValueChange = { search = it },
-            placeholder = { Text("Search users") },
-            leadingIcon = {
-                Icon(Icons.Default.Search, contentDescription = null)
-            },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            shape = RoundedCornerShape(14.dp)
-        )
-
-        Spacer(Modifier.height(12.dp))
-
         when {
             loading -> Box(
-                modifier = Modifier.fillMaxSize(),
+                Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator(color = Green)
@@ -570,68 +876,50 @@ fun UsersScreen(
 
             error.isNotBlank() -> Text(error, color = Color.Red)
 
-            users.isEmpty() -> Box(
-                modifier = Modifier.fillMaxSize(),
+            chats.isEmpty() -> Box(
+                Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    "Abhi koi doosra user registered nahi hai.",
+                    "Abhi koi chat nahi. Search se user dhoondein.",
                     color = Muted
                 )
             }
 
             else -> LazyColumn {
-                items(
-                    users.filter {
-                        it.name.contains(search, ignoreCase = true)
-                    },
-                    key = { it.uid }
-                ) { user ->
+                items(chats, key = { it.id }) { chat ->
                     Row(
-                        modifier = Modifier
+                        Modifier
                             .fillMaxWidth()
-                            .clickable { onUserClick(user) }
+                            .clickable { onChatClick(chat) }
                             .padding(vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(52.dp)
-                                .background(
-                                    Green.copy(alpha = 0.14f),
-                                    CircleShape
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                user.name.take(1).uppercase(),
-                                color = Green,
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+                        UserAvatar(chat.otherName)
 
                         Spacer(Modifier.width(12.dp))
 
-                        Column(modifier = Modifier.weight(1f)) {
+                        Column(Modifier.weight(1f)) {
                             Text(
-                                user.name,
+                                chat.otherName,
                                 color = Ink,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 16.sp
+                                fontWeight = FontWeight.SemiBold
                             )
                             Text(
-                                "Tap to start a private chat",
+                                chat.lastMessage,
                                 color = Muted,
-                                fontSize = 12.sp
+                                fontSize = 13.sp,
+                                maxLines = 1
                             )
                         }
 
-                        Icon(
-                            Icons.Default.ChevronRight,
-                            contentDescription = null,
-                            tint = Muted
-                        )
+                        if (chat.lastMessageAt > 0) {
+                            Text(
+                                formatTime(chat.lastMessageAt),
+                                color = Muted,
+                                fontSize = 10.sp
+                            )
+                        }
                     }
 
                     HorizontalDivider(color = Color(0xFFE8EFED))
@@ -654,6 +942,8 @@ fun ConversationScreen(
     var sending by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
 
+    BackHandler(onBack = onBack)
+
     DisposableEffect(conversationId) {
         val registration = db.collection("conversations")
             .document(conversationId)
@@ -672,10 +962,10 @@ fun ConversationScreen(
                         val time = document.getLong("createdAt") ?: 0L
 
                         Message(
-                            id = document.id,
-                            senderId = sender,
-                            text = text,
-                            createdAt = time
+                            document.id,
+                            sender,
+                            text,
+                            time
                         )
                     }
                     error = ""
@@ -686,12 +976,12 @@ fun ConversationScreen(
     }
 
     Column(
-        modifier = Modifier
+        Modifier
             .fillMaxSize()
             .background(Pale)
     ) {
         Row(
-            modifier = Modifier
+            Modifier
                 .fillMaxWidth()
                 .background(Color.White)
                 .padding(10.dp),
@@ -701,27 +991,21 @@ fun ConversationScreen(
                 Icon(Icons.Default.ArrowBack, contentDescription = "Back")
             }
 
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .background(Green.copy(alpha = 0.14f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    otherUser.name.take(1).uppercase(),
-                    color = Green,
-                    fontWeight = FontWeight.Bold
-                )
-            }
+            UserAvatar(otherUser.name)
 
             Spacer(Modifier.width(10.dp))
 
-            Text(
-                otherUser.name,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                color = Ink
-            )
+            Column {
+                Text(
+                    otherUser.name,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Ink
+                )
+                if (otherUser.username.isNotBlank()) {
+                    Text("@${otherUser.username}", color = Muted, fontSize = 11.sp)
+                }
+            }
         }
 
         if (error.isNotBlank()) {
@@ -743,7 +1027,7 @@ fun ConversationScreen(
                 val mine = item.senderId == currentUid
 
                 Column(
-                    modifier = Modifier
+                    Modifier
                         .fillMaxWidth()
                         .padding(vertical = 4.dp),
                     horizontalAlignment = if (mine) {
@@ -753,7 +1037,7 @@ fun ConversationScreen(
                     }
                 ) {
                     Column(
-                        modifier = Modifier
+                        Modifier
                             .widthIn(max = 290.dp)
                             .background(
                                 if (mine) Green else Color.White,
@@ -770,12 +1054,8 @@ fun ConversationScreen(
                         Spacer(Modifier.height(4.dp))
 
                         Text(
-                            if (item.createdAt > 0) {
-                                SimpleDateFormat(
-                                    "hh:mm a",
-                                    Locale.getDefault()
-                                ).format(Date(item.createdAt))
-                            } else "",
+                            if (item.createdAt > 0) formatTime(item.createdAt)
+                            else "",
                             color = if (mine) Color.White.copy(alpha = 0.75f)
                             else Muted,
                             fontSize = 10.sp,
@@ -787,7 +1067,7 @@ fun ConversationScreen(
         }
 
         Row(
-            modifier = Modifier
+            Modifier
                 .fillMaxWidth()
                 .background(Color.White)
                 .padding(10.dp),
@@ -811,35 +1091,35 @@ fun ConversationScreen(
                         sending = true
                         error = ""
 
+                        val now = System.currentTimeMillis()
+
                         val messageData = hashMapOf(
                             "senderId" to currentUid,
                             "text" to textToSend,
-                            "createdAt" to System.currentTimeMillis()
+                            "createdAt" to now
                         )
 
-                        db.collection("conversations")
+                        val conversationRef = db.collection("conversations")
                             .document(conversationId)
-                            .collection("messages")
+
+                        conversationRef.collection("messages")
                             .add(messageData)
                             .addOnSuccessListener {
-                                db.collection("conversations")
-                                    .document(conversationId)
-                                    .update(
-                                        mapOf(
-                                            "lastMessage" to textToSend,
-                                            "lastMessageAt" to System.currentTimeMillis()
-                                        )
+                                conversationRef.update(
+                                    mapOf(
+                                        "lastMessage" to textToSend,
+                                        "lastMessageAt" to now
                                     )
-                                    .addOnCompleteListener { updateTask ->
-                                        sending = false
-                                        if (updateTask.isSuccessful) {
-                                            message = ""
-                                        } else {
-                                            error = updateTask.exception?.localizedMessage
-                                                ?: "Message save ho gaya, lekin chat update nahi hui."
-                                            message = ""
-                                        }
+                                ).addOnCompleteListener { updateTask ->
+                                    sending = false
+                                    message = ""
+
+                                    if (!updateTask.isSuccessful) {
+                                        error = updateTask.exception
+                                            ?.localizedMessage
+                                            ?: "Chat update nahi hui."
                                     }
+                                }
                             }
                             .addOnFailureListener {
                                 sending = false
@@ -868,33 +1148,38 @@ fun ConversationScreen(
 }
 
 @Composable
-fun PlaceholderPage(title: String, message: String) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+fun UserAvatar(name: String) {
+    Box(
+        Modifier
+            .size(48.dp)
+            .background(Green.copy(alpha = 0.14f), CircleShape),
+        contentAlignment = Alignment.Center
     ) {
         Text(
-            title,
-            fontSize = 23.sp,
+            name.take(1).uppercase(),
+            color = Green,
             fontWeight = FontWeight.Bold,
-            color = Ink
+            fontSize = 19.sp
         )
-        Spacer(Modifier.height(8.dp))
-        Text(message, color = Muted)
     }
+}
+
+fun formatTime(time: Long): String {
+    return SimpleDateFormat(
+        "hh:mm a",
+        Locale.getDefault()
+    ).format(Date(time))
 }
 
 @Composable
 fun SettingsPage(
     name: String,
+    username: String,
     email: String,
     onLogout: () -> Unit
 ) {
     Column(
-        modifier = Modifier
+        Modifier
             .fillMaxSize()
             .padding(18.dp)
     ) {
@@ -908,24 +1193,13 @@ fun SettingsPage(
         Spacer(Modifier.height(20.dp))
 
         Row(
-            modifier = Modifier
+            Modifier
                 .fillMaxWidth()
                 .background(Color.White, RoundedCornerShape(14.dp))
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .size(52.dp)
-                    .background(Green.copy(alpha = 0.14f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Default.Person,
-                    contentDescription = null,
-                    tint = Green
-                )
-            }
+            UserAvatar(name)
 
             Spacer(Modifier.width(14.dp))
 
@@ -935,6 +1209,7 @@ fun SettingsPage(
                     fontWeight = FontWeight.Bold,
                     color = Ink
                 )
+                Text("@$username", color = Muted, fontSize = 12.sp)
                 Text(email, color = Muted, fontSize = 12.sp)
             }
         }
@@ -942,7 +1217,7 @@ fun SettingsPage(
         Spacer(Modifier.height(20.dp))
 
         Row(
-            modifier = Modifier
+            Modifier
                 .fillMaxWidth()
                 .clickable { onLogout() }
                 .background(Color.White, RoundedCornerShape(12.dp))
