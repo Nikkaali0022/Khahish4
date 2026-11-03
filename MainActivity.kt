@@ -1341,31 +1341,80 @@ fun ConversationScreen(
     db: FirebaseFirestore,
     onBack: () -> Unit
 ) {
-    var message by remember { mutableStateOf("") }
+       var message by remember { mutableStateOf("") }
     var messages by remember { mutableStateOf<List<Message>>(emptyList()) }
     var sending by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
-
     var otherOnline by remember { mutableStateOf(false) }
-    var otherLastSeen by remember { mutableLongStateOf(0L) }
+   var otherLastSeen by remember { mutableLongStateOf(0L) }
+   var otherTyping by remember { mutableStateOf(false) }
+   var isTyping by remember { mutableStateOf(false) }
 
     // Doosre user ka live online status sunna
-    DisposableEffect(otherUser.uid) {
-        val presenceRegistration = db.collection("users")
-            .document(otherUser.uid)
-            .addSnapshotListener { document, exception ->
+DisposableEffect(otherUser.uid) {
+    val presenceRegistration = db.collection("users")
+        .document(otherUser.uid)
+        .addSnapshotListener { document, exception ->
 
-                if (exception == null && document != null && document.exists()) {
-                    otherOnline = document.getBoolean("isOnline") ?: false
-                    otherLastSeen = document.getLong("lastSeenAt") ?: 0L
-                }
+            if (exception == null && document != null && document.exists()) {
+                otherOnline = document.getBoolean("isOnline") ?: false
+                otherLastSeen = document.getLong("lastSeenAt") ?: 0L
             }
+        }
 
-        onDispose {
-            presenceRegistration.remove()
+    onDispose {
+        presenceRegistration.remove()
+    }
+}
+
+// Doosre user ka typing status sunna
+DisposableEffect(conversationId, otherUser.uid) {
+    val typingRegistration = db.collection("conversations")
+        .document(conversationId)
+        .addSnapshotListener { document, exception ->
+
+            if (exception == null && document != null && document.exists()) {
+                otherTyping = document.getBoolean(
+                    "typing_${otherUser.uid}"
+                ) ?: false
+            }
+        }
+
+    onDispose {
+        typingRegistration.remove()
+    }
+}
+
+   LaunchedEffect(message) {
+    val conversationRef = db.collection("conversations")
+        .document(conversationId)
+
+    if (message.isNotBlank()) {
+        if (!isTyping) {
+            isTyping = true
+            conversationRef.set(
+                mapOf("typing_$currentUid" to true),
+                SetOptions.merge()
+            )
+        }
+
+        kotlinx.coroutines.delay(2500)
+
+        isTyping = false
+        conversationRef.set(
+            mapOf("typing_$currentUid" to false),
+            SetOptions.merge()
+        )
+    } else {
+        if (isTyping) {
+            isTyping = false
+            conversationRef.set(
+                mapOf("typing_$currentUid" to false),
+                SetOptions.merge()
+            )
         }
     }
-
+}
     DisposableEffect(conversationId, currentUid) {
         val messagesRef = db.collection("conversations")
             .document(conversationId)
@@ -1469,16 +1518,16 @@ fun ConversationScreen(
                 )
 
                 Text(
-                    if (otherOnline) {
-                        "● Online"
-                    } else if (otherLastSeen > 0L) {
-                        "Last seen ${formatLastSeen(otherLastSeen)}"
-                    } else {
-                        "Offline"
-                    },
-                    color = if (otherOnline) Green else Muted,
-                    fontSize = 11.sp
-                )
+    when {
+        otherTyping -> "Typing…"
+        otherOnline -> "● Online"
+        otherLastSeen > 0L ->
+            "Last seen ${formatLastSeen(otherLastSeen)}"
+        else -> "Offline"
+    },
+    color = if (otherTyping || otherOnline) Green else Muted,
+    fontSize = 11.sp
+)
             }
         }
 
